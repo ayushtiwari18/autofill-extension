@@ -295,3 +295,90 @@ function extractFieldMetadata(inputElement) {
     return null;
   }
 }
+
+// ============================================
+// FORM SCANNING
+// ============================================
+
+/**
+ * Scan a single form and extract all metadata
+ * @param {HTMLFormElement} formElement - Form to scan
+ * @returns {Object} - Form data object
+ */
+function scanForm(formElement) {
+  try {
+    const formId = formElement.id || generateUniqueId('form');
+    const formType = identifyFormType(formElement);
+    const hasCaptcha = detectCaptcha(formElement);
+    
+    // For Google Forms iframes, can't access internal fields
+    if (formType === 'google-forms' && formElement.tagName === 'IFRAME') {
+      return {
+        id: formId,
+        type: formType,
+        hasCaptcha,
+        fields: [], // Cannot access iframe content
+        action: formElement.src || '',
+        method: 'unknown'
+      };
+    }
+    
+    // Find all input fields
+    const fields = [];
+    const inputs = formElement.querySelectorAll(FORM_FIELD_SELECTORS);
+    
+    inputs.forEach(input => {
+      if (isElementVisible(input) && !isButtonOrSubmit(input)) {
+        const fieldMetadata = extractFieldMetadata(input);
+        if (fieldMetadata) {
+          fields.push(fieldMetadata);
+        }
+      }
+    });
+    
+    return {
+      id: formId,
+      type: formType,
+      hasCaptcha,
+      fields,
+      action: formElement.action || '',
+      method: (formElement.method || 'GET').toUpperCase()
+    };
+  } catch (error) {
+    console.error('[Autofill Scanner] Error scanning form:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Scan entire page for forms
+ * @returns {Object} - Page scan result
+ */
+function scanPage() {
+  try {
+    const forms = detectForms();
+    const scannedForms = [];
+    
+    forms.forEach(form => {
+      const formData = scanForm(form);
+      if (formData && formData.fields.length > 0 || formData.type === 'google-forms') {
+        scannedForms.push(formData);
+      }
+    });
+    
+    return {
+      url: window.location.href,
+      title: document.title,
+      forms: scannedForms,
+      scannedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    console.error('[Autofill Scanner] Error scanning page:', error.message);
+    return {
+      url: window.location.href,
+      title: document.title,
+      forms: [],
+      scannedAt: new Date().toISOString()
+    };
+  }
+}
