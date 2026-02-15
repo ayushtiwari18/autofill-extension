@@ -35,6 +35,10 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
 ```
 /autofill-extension
  ├── public/
+ │   ├── index.html
+ │   ├── icon16.png
+ │   ├── icon48.png
+ │   └── icon128.png
  ├── src/
  │   ├── background/
  │   │   └── serviceWorker.js
@@ -59,6 +63,7 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
  │   └── index.js
  ├── manifest.json
  ├── package.json
+ ├── webpack.config.js
  └── README.md
 ```
 
@@ -102,21 +107,25 @@ Threshold: score >= 0.6
 
 ## 🚀 Development Phases
 
-### Current Status: PHASE 0 ✅
+### Current Status: PHASE 1 ✅
 - [x] Repository initialization
 - [x] Documentation structure
 - [x] Folder structure defined
+- [x] Manifest V3 configuration
+- [x] Webpack build pipeline
+- [x] React popup skeleton
+- [x] Extension loads in Chrome
 
 ### Upcoming Phases
-- [ ] Phase 1: Extension skeleton (manifest + basic structure)
-- [ ] Phase 2: Profile storage with encryption
-- [ ] Phase 3: Content script scanner
-- [ ] Phase 4: Field mapping engine
-- [ ] Phase 5: React popup UI
-- [ ] Phase 6: Autofill executor
-- [ ] Phase 7: Adapter implementations
-- [ ] Phase 8: Edge case handling
-- [ ] Phase 9: Testing and validation
+- [ ] Phase 2: Encryption utilities
+- [ ] Phase 3: Profile storage engine
+- [ ] Phase 4: Content script scanner
+- [ ] Phase 5: Field mapping engine
+- [ ] Phase 6: React popup UI (full)
+- [ ] Phase 7: Autofill executor
+- [ ] Phase 8: Adapter implementations
+- [ ] Phase 9: Edge case handling
+- [ ] Phase 10: Testing and validation
 
 ## 📝 Development Methodology
 Every feature follows:
@@ -135,14 +144,14 @@ Development halts immediately if:
 **Rule: Document uncertainty as TODO rather than guessing**
 
 ## 🎯 Success Criteria
-- [x] Google Forms autofill works correctly
-- [x] Generic HTML forms autofill works
-- [x] Resume upload functional
-- [x] No auto-submit behavior
-- [x] No data leakage
-- [x] No console errors
-- [x] Clean, readable codebase
-- [x] No unnecessary complexity
+- [ ] Google Forms autofill works correctly
+- [ ] Generic HTML forms autofill works
+- [ ] Resume upload functional
+- [ ] No auto-submit behavior
+- [ ] No data leakage
+- [ ] No console errors
+- [ ] Clean, readable codebase
+- [ ] No unnecessary complexity
 
 ## 📚 TODO List
 _Uncertainties and deferred decisions are tracked here_
@@ -150,10 +159,54 @@ _Uncertainties and deferred decisions are tracked here_
 ---
 
 ## 🏗️ Build Instructions
-_To be added in Phase 1_
+
+### Prerequisites
+- Node.js 16+ and npm
+- Chrome/Chromium browser
+
+### Installation
+```bash
+# Clone the repository
+git clone https://github.com/ayushtiwari18/autofill-extension.git
+cd autofill-extension
+
+# Install dependencies
+npm install
+```
+
+### Development Build
+```bash
+# Build for development (with watch mode)
+npm run dev
+
+# Or build once for production
+npm run build
+```
+
+### Load Extension in Chrome
+1. Open Chrome and navigate to `chrome://extensions/`
+2. Enable "Developer mode" (toggle in top right)
+3. Click "Load unpacked"
+4. Select the `dist/` folder from this project
+5. Click the extension icon in Chrome toolbar to open popup
+
+### Verify Installation
+- Extension icon appears in Chrome toolbar
+- Clicking icon opens popup with "Phase 1 Complete ✓" message
+- No console errors in popup or background service worker
+- Check console: Right-click extension popup → Inspect → Console
+
+### Clean Build
+```bash
+# Remove dist folder
+npm run clean
+
+# Rebuild
+npm run build
+```
 
 ## 🧪 Testing
-_To be added in Phase 9_
+_To be added in Phase 10_
 
 ## 📄 License
 MIT License - Personal use productivity tool
