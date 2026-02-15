@@ -3,60 +3,58 @@ import { useAppContext } from './Popup.jsx';
 import { loadProfile } from '../storage/profileStore.js';
 
 function Login() {
-  const {
-    setProfile,
-    setPassword,
-    setIsUnlocked,
-    setCurrentScreen,
-    setError
-  } = useAppContext();
-
+  const { setCurrentScreen, setProfile, setPassword, setIsUnlocked, setError } = useAppContext();
   const [passwordInput, setPasswordInput] = useState('');
-  const [localError, setLocalError] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleUnlock = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     
-    if (!passwordInput) {
-      setLocalError('Please enter your password');
+    if (!passwordInput.trim()) {
+      setError('Please enter your password');
       return;
     }
 
-    setLoading(true);
-    setLocalError(null);
+    setIsLoading(true);
+    setError(null);
 
     try {
-      // Attempt to decrypt profile
-      const decryptedProfile = await loadProfile(passwordInput);
+      // Attempt to decrypt and load profile
+      console.log('[Login] Attempting to decrypt profile...');
+      const profile = await loadProfile(passwordInput);
       
-      // Success - update context
-      setProfile(decryptedProfile);
-      setPassword(passwordInput);
-      setIsUnlocked(true);
-      setCurrentScreen('dashboard');
-      
-    } catch (err) {
-      console.error('[Login] Decryption failed:', err);
-      setLocalError('Incorrect password. Please try again.');
+      if (profile) {
+        console.log('[Login] Profile decrypted successfully');
+        setProfile(profile);
+        setPassword(passwordInput);
+        setIsUnlocked(true);
+        setCurrentScreen('dashboard');
+      } else {
+        setError('No profile found. Please create one.');
+        setCurrentScreen('create');
+      }
+    } catch (error) {
+      console.error('[Login] Decryption failed:', error);
+      setError(`Login failed: ${error.message}`);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
-  const handleCreateNew = () => {
-    setCurrentScreen('create');
-  };
+  const handleClearData = async () => {
+    if (!confirm('⚠️ This will delete your saved profile. Are you sure?')) {
+      return;
+    }
 
-  const handleReset = async () => {
-    if (confirm('Are you sure you want to delete your profile? This cannot be undone.')) {
-      try {
-        await chrome.storage.local.remove(['encryptedProfile']);
-        setCurrentScreen('create');
-      } catch (err) {
-        console.error('[Login] Failed to delete profile:', err);
-        setLocalError('Failed to delete profile');
-      }
+    try {
+      // Clear all storage
+      await chrome.storage.local.clear();
+      console.log('[Login] Storage cleared');
+      alert('✅ Profile data cleared. You can now create a new profile.');
+      setCurrentScreen('create');
+    } catch (error) {
+      console.error('[Login] Failed to clear storage:', error);
+      setError('Failed to clear data');
     }
   };
 
@@ -67,23 +65,16 @@ function Login() {
         <p className="welcome-subtitle">Enter your password to unlock your profile</p>
       </div>
 
-      {localError && (
-        <div className="alert alert-error">
-          {localError}
-        </div>
-      )}
-
-      <form onSubmit={handleUnlock}>
+      <form onSubmit={handleLogin}>
         <div className="input-group">
-          <label htmlFor="password" className="input-label">Password</label>
+          <label className="input-label required">Password</label>
           <input
             type="password"
-            id="password"
             className="input-field"
-            placeholder="Enter your password"
             value={passwordInput}
             onChange={(e) => setPasswordInput(e.target.value)}
-            disabled={loading}
+            placeholder="Enter your password"
+            disabled={isLoading}
             autoFocus
           />
         </div>
@@ -91,12 +82,11 @@ function Login() {
         <button
           type="submit"
           className="btn btn-primary btn-block"
-          disabled={loading}
+          disabled={isLoading}
         >
-          {loading ? (
+          {isLoading ? (
             <>
-              <span className="spinner"></span>
-              <span style={{ marginLeft: '8px' }}>Unlocking...</span>
+              <span className="spinner"></span> Decrypting...
             </>
           ) : (
             'Unlock Profile'
@@ -108,11 +98,14 @@ function Login() {
         <button
           type="button"
           className="btn btn-link"
-          onClick={handleReset}
-          disabled={loading}
+          onClick={handleClearData}
         >
-          Forgot password? Reset profile
+          Clear Data & Start Fresh
         </button>
+      </div>
+
+      <div className="mt-16 alert alert-info">
+        <strong>Tip:</strong> If you forgot your password, you'll need to clear your data and create a new profile.
       </div>
     </div>
   );
