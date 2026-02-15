@@ -13,20 +13,21 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
 
 ## 🏗 Architecture
 - **Manifest V3** Chrome Extension
-- **React** for Popup UI
+- **React 18** for Popup UI
 - **JavaScript** (no TypeScript)
 - **Web Crypto API** for AES encryption
 - **chrome.storage.local** for encrypted data persistence
 - **Content Script** for read-only form scanning
 - **MutationObserver** for dynamic form detection
 - **Rule-based Field Mapper** with confidence scoring
+- **React Context API** for state management
 
 ## 📦 Core Components
-1. **Popup UI** (React) - Profile management and controls
-2. **Background Service Worker** - Event coordination and message handling
-3. **Content Script Scanner** - Form detection and metadata extraction
-4. **Field Mapping Engine** - Rule-based field matcher with confidence scores
-5. **Profile Storage Engine** - Encrypted data persistence
+1. **Popup UI** (React) - Password-protected profile management and controls ✅
+2. **Background Service Worker** - Event coordination and message handling ✅
+3. **Content Script Scanner** - Form detection and metadata extraction ✅
+4. **Field Mapping Engine** - Rule-based field matcher with confidence scores ✅
+5. **Profile Storage Engine** - Encrypted data persistence ✅
 6. **Adapter Layer** - Form-specific handlers (Google Forms, Generic HTML)
 
 ## 🎯 Supported Forms
@@ -38,7 +39,7 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
 ```
 /autofill-extension
  ├── public/
- │   ├── index.html
+ │   ├── index.html ✅
  │   ├── icon16.png
  │   ├── icon48.png
  │   └── icon128.png
@@ -57,16 +58,19 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
  │   ├── storage/
  │   │   └── profileStore.js ✅
  │   ├── ui/
- │   │   ├── Popup.jsx
- │   │   ├── Review.jsx
- │   │   └── ProfileForm.jsx
+ │   │   ├── Popup.jsx ✅
+ │   │   ├── Login.jsx ✅
+ │   │   ├── Dashboard.jsx ✅
+ │   │   ├── ProfileForm.jsx ✅
+ │   │   ├── Review.jsx ✅
+ │   │   └── styles.css ✅
  │   ├── utils/
  │   │   ├── encryption.js ✅
  │   │   └── validators.js
- │   └── index.js
- ├── manifest.json
- ├── package.json
- ├── webpack.config.js
+ │   └── index.js ✅
+ ├── manifest.json ✅
+ ├── package.json ✅
+ ├── webpack.config.js ✅
  └── README.md
 ```
 
@@ -112,6 +116,39 @@ Confidence Thresholds:
 - **Links**: linkedin, github, portfolio, website
 - **Documents**: resume (file upload)
 
+## 💡 UI Screens
+
+### 1. Login Screen
+- Password entry for profile decryption
+- "Unlock Profile" button
+- Reset profile option
+
+### 2. Dashboard Screen
+- Welcome message with user's first name
+- Profile completion percentage (with progress bar)
+- Forms detected count
+- Quick action buttons:
+  - ✏️ Edit Profile
+  - 🔍 Scan Current Page
+  - ⚡ Autofill Form(s)
+  - 🔒 Lock Profile
+- Storage usage meter (5MB limit)
+
+### 3. Profile Form Screen (Create/Edit)
+- All 25 profile fields organized in 5 sections
+- Real-time validation (email, URLs)
+- File upload for resume (max 2MB)
+- Password setup (create mode only)
+- Save and Cancel buttons
+
+### 4. Review Screen
+- Matched fields with confidence badges
+- Inline editing capability
+- Overall confidence score
+- Warning for medium confidence matches
+- Unmatched form fields (collapsible)
+- "Confirm & Autofill" button
+
 ## 📊 Mapping Output Structure
 ```json
 {
@@ -143,7 +180,7 @@ Confidence Thresholds:
 ## 🛡️ Edge Cases Handled
 - CAPTCHA detection → disable autofill
 - No form detected → user notification
-- Multiple forms → user selection UI
+- Multiple forms → user selection UI (Phase 7)
 - Hidden forms → automatically excluded
 - Dynamic forms → MutationObserver re-scans (max 3)
 - Google Forms iframe → detected but content inaccessible
@@ -154,6 +191,8 @@ Confidence Thresholds:
 - Array values (skills) → joined with commas
 - Corrupted encrypted data → reset with warning
 - Storage quota exceeded → clear error message
+- Wrong password → error message with reset option
+- Popup closed during save → async save completes
 
 ## 🚀 Development Phases
 
@@ -209,13 +248,27 @@ Confidence Thresholds:
 - [x] Complete profile-to-form mapping
 - [x] Match filtering (confidence threshold >= 0.6)
 
-### 📍 Current Status: PHASE 5 COMPLETE ✅
+### ✅ PHASE 6 - COMPLETE
+- [x] React AppContext with state management
+- [x] Screen routing (login, create, dashboard, edit, review)
+- [x] Login component with password authentication
+- [x] Dashboard with profile stats and actions
+- [x] ProfileForm with all 25 fields (5 sections)
+- [x] Form validation (email, URLs, passwords)
+- [x] File upload for resume (2MB limit)
+- [x] Review component with match display
+- [x] Confidence badges (high/medium/low)
+- [x] Inline match editing
+- [x] Global CSS styles
+- [x] Popup-background communication
+- [x] Extension badge updates (form count)
+
+### 📍 Current Status: PHASE 6 COMPLETE ✅
 
 ### Upcoming Phases
-- [ ] Phase 6: React popup UI (full)
-- [ ] Phase 7: Autofill executor
-- [ ] Phase 8: Adapter implementations
-- [ ] Phase 9: Edge case handling
+- [ ] Phase 7: Autofill executor (actually fill form fields)
+- [ ] Phase 8: Adapter implementations (Google Forms, Generic)
+- [ ] Phase 9: Edge case handling and polish
 - [ ] Phase 10: Testing and validation
 
 ## 📝 Development Methodology
@@ -283,9 +336,10 @@ npm run build
 
 ### Verify Installation
 - Extension icon appears in Chrome toolbar
-- Clicking icon opens popup
+- Clicking icon opens popup UI
 - No console errors in popup or background service worker
-- Check console: Right-click extension popup → Inspect → Console
+- Check popup console: Right-click extension popup → Inspect → Console
+- Check background console: chrome://extensions/ → Service Worker → Inspect
 
 ### Clean Build
 ```bash
@@ -298,39 +352,38 @@ npm run build
 
 ## 🧪 Testing Modules
 
-### Phase 2: Encryption Module
-```javascript
-import { encrypt, decrypt } from './src/utils/encryption.js';
-
-const data = { test: 'data' };
-const password = 'SecurePass123';
-const encrypted = await encrypt(data, password);
-const decrypted = await decrypt(encrypted, password);
-console.log(decrypted); // { test: 'data' }
-```
-
-### Phase 3: Profile Storage
-```javascript
-import { initializeProfile, saveProfile, loadProfile } from './src/storage/profileStore.js';
-
-const profile = initializeProfile();
-profile.profile.personal.firstName = 'John';
-await saveProfile(profile, 'password123');
-
-const loaded = await loadProfile('password123');
-console.log(loaded.profile.personal.firstName); // 'John'
-```
-
-### Phase 4: Form Scanner
-```javascript
-// Scanner runs automatically on page load
-// Open browser console on any page with forms
-// Look for: "[Autofill Scanner] Found X form(s)"
-
-// Check background service worker console:
-// chrome://extensions/ → Service Worker → Inspect
-// Should see: "Forms scanned on [URL]: X form(s)"
-```
+### Phase 6: React Popup UI
+1. Build extension: `npm run build`
+2. Load in Chrome (see instructions above)
+3. **First-time user flow**:
+   - Open popup (no profile exists)
+   - Should see "Create Profile" form
+   - Fill all 25 fields (email required)
+   - Set password (min 8 chars)
+   - Click "Save Profile"
+   - Should redirect to Dashboard
+4. **Returning user flow**:
+   - Close and reopen popup
+   - Should see Login screen
+   - Enter password
+   - Should decrypt and show Dashboard
+5. **Dashboard features**:
+   - Profile completion percentage displayed
+   - Storage usage shown
+   - Scan page button functional
+   - Forms detected count updates
+6. **Profile editing**:
+   - Click "Edit Profile"
+   - Modify fields
+   - Save changes
+   - Verify persistence
+7. **Review screen** (after Phase 7):
+   - Navigate to page with form
+   - Scan page
+   - Click "Autofill"
+   - Review matched fields
+   - Inline edit values
+   - Confirm (Phase 7 execution)
 
 ### Phase 5: Field Mapper
 ```javascript
@@ -347,6 +400,41 @@ const profile = await loadProfile('password123');
 const mapping = mapProfileToForm(profile, formData);
 console.log(`Matched ${mapping.matches.length} fields`);
 console.log(`Overall confidence: ${mapping.overallConfidence}`);
+```
+
+### Phase 4: Form Scanner
+```javascript
+// Scanner runs automatically on page load
+// Open browser console on any page with forms
+// Look for: "[Autofill Scanner] Found X form(s)"
+
+// Check background service worker console:
+// chrome://extensions/ → Service Worker → Inspect
+// Should see: "Forms scanned on [URL]: X form(s)"
+// Extension badge should show form count
+```
+
+### Phase 3: Profile Storage
+```javascript
+import { initializeProfile, saveProfile, loadProfile } from './src/storage/profileStore.js';
+
+const profile = initializeProfile();
+profile.profile.personal.firstName = 'John';
+await saveProfile(profile, 'password123');
+
+const loaded = await loadProfile('password123');
+console.log(loaded.profile.personal.firstName); // 'John'
+```
+
+### Phase 2: Encryption Module
+```javascript
+import { encrypt, decrypt } from './src/utils/encryption.js';
+
+const data = { test: 'data' };
+const password = 'SecurePass123';
+const encrypted = await encrypt(data, password);
+const decrypted = await decrypt(encrypted, password);
+console.log(decrypted); // { test: 'data' }
 ```
 
 ## 📄 License
