@@ -61,3 +61,56 @@ export function isWebCryptoAvailable() {
     typeof window.crypto.subtle.decrypt === 'function'
   );
 }
+
+/**
+ * Derive encryption key from password using PBKDF2
+ * @param {string} password - User's encryption password
+ * @param {Uint8Array} salt - 16-byte salt for key derivation
+ * @returns {Promise<CryptoKey>} - Derived AES-GCM key
+ * @throws {Error} - If Web Crypto unavailable or derivation fails
+ */
+export async function deriveKey(password, salt) {
+  if (!isWebCryptoAvailable()) {
+    throw new Error('Web Crypto API is not available in this browser');
+  }
+
+  if (!password || typeof password !== 'string' || password.length === 0) {
+    throw new Error('Password cannot be empty');
+  }
+
+  if (!(salt instanceof Uint8Array) || salt.length !== SALT_LENGTH) {
+    throw new Error(`Salt must be a Uint8Array of ${SALT_LENGTH} bytes`);
+  }
+
+  // Convert password string to ArrayBuffer
+  const encoder = new TextEncoder();
+  const passwordBuffer = encoder.encode(password);
+
+  // Import password as CryptoKey for PBKDF2
+  const baseKey = await window.crypto.subtle.importKey(
+    'raw',
+    passwordBuffer,
+    'PBKDF2',
+    false,
+    ['deriveBits', 'deriveKey']
+  );
+
+  // Derive AES-GCM key using PBKDF2
+  const key = await window.crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: salt,
+      iterations: PBKDF2_ITERATIONS,
+      hash: 'SHA-256'
+    },
+    baseKey,
+    {
+      name: 'AES-GCM',
+      length: KEY_LENGTH
+    },
+    false,
+    ['encrypt', 'decrypt']
+  );
+
+  return key;
+}
