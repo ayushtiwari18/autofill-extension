@@ -12,6 +12,7 @@ import { encrypt, decrypt } from '../utils/encryption.js';
 const STORAGE_KEY = 'autofill_extension_profile';
 const MAX_RECOMMENDED_SIZE = 5 * 1024 * 1024; // 5MB in bytes
 const PROFILE_VERSION = '1.0';
+const QUOTA_BYTES = 10485760; // 10MB Chrome storage quota
 
 // ============================================
 // PRIVATE HELPER FUNCTIONS
@@ -216,4 +217,60 @@ export async function loadProfile(password) {
   }
 
   return profile;
+}
+
+/**
+ * Delete profile from chrome.storage.local
+ * @returns {Promise<void>} - Resolves on success
+ * @throws {Error} - If deletion fails
+ */
+export async function deleteProfile() {
+  // Check Chrome Storage API availability
+  if (!isChromeStorageAvailable()) {
+    throw new Error('Chrome Storage API is not available');
+  }
+
+  // Remove profile from storage
+  try {
+    await chrome.storage.local.remove(STORAGE_KEY);
+  } catch (error) {
+    throw new Error(`Failed to delete profile: ${error.message}`);
+  }
+}
+
+/**
+ * Get current storage usage information
+ * @returns {Promise<Object>} - { bytesInUse, quotaBytes, percentUsed }
+ * @throws {Error} - If storage API unavailable
+ */
+export async function getStorageUsage() {
+  // Check Chrome Storage API availability
+  if (!isChromeStorageAvailable()) {
+    throw new Error('Chrome Storage API is not available');
+  }
+
+  // Get bytes in use for profile key
+  let bytesInUse = 0;
+  try {
+    if (chrome.storage.local.getBytesInUse) {
+      bytesInUse = await chrome.storage.local.getBytesInUse(STORAGE_KEY);
+    } else {
+      // Fallback: calculate from stored data
+      const result = await chrome.storage.local.get(STORAGE_KEY);
+      if (result[STORAGE_KEY]) {
+        bytesInUse = calculateProfileSize(result[STORAGE_KEY]);
+      }
+    }
+  } catch (error) {
+    throw new Error(`Failed to get storage usage: ${error.message}`);
+  }
+
+  // Calculate percentage
+  const percentUsed = (bytesInUse / QUOTA_BYTES) * 100;
+
+  return {
+    bytesInUse,
+    quotaBytes: QUOTA_BYTES,
+    percentUsed: parseFloat(percentUsed.toFixed(2))
+  };
 }
