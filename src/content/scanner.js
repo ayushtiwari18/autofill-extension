@@ -190,3 +190,108 @@ function detectCaptcha(formElement) {
   
   return false;
 }
+
+// ============================================
+// FIELD METADATA EXTRACTION
+// ============================================
+
+/**
+ * Find label associated with input field
+ * @param {HTMLInputElement} inputElement - Input element
+ * @returns {string|null} - Label text or null
+ */
+function findAssociatedLabel(inputElement) {
+  try {
+    // Method 1: <label for="input-id">Text</label>
+    if (inputElement.id) {
+      const label = document.querySelector(`label[for="${sanitizeSelectorString(inputElement.id)}"]`);
+      if (label) return label.textContent.trim();
+    }
+    
+    // Method 2: <label><input></label>
+    const parentLabel = inputElement.closest('label');
+    if (parentLabel) return parentLabel.textContent.trim();
+    
+    // Method 3: aria-labelledby
+    const labelledBy = inputElement.getAttribute('aria-labelledby');
+    if (labelledBy) {
+      const labelElement = document.getElementById(labelledBy);
+      if (labelElement) return labelElement.textContent.trim();
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('[Autofill Scanner] Error finding label:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Generate CSS selector for element
+ * @param {HTMLElement} element - Element to target
+ * @returns {string} - CSS selector
+ */
+function generateCSSSelector(element) {
+  try {
+    // Priority 1: ID
+    if (element.id) {
+      return `#${sanitizeSelectorString(element.id)}`;
+    }
+    
+    // Priority 2: Name attribute
+    if (element.name) {
+      const tagName = element.tagName.toLowerCase();
+      return `${tagName}[name="${sanitizeSelectorString(element.name)}"]`;
+    }
+    
+    // Priority 3: Generate path-based selector
+    const path = [];
+    let current = element;
+    
+    while (current && current.nodeType === Node.ELEMENT_NODE && current !== document.body) {
+      let selector = current.tagName.toLowerCase();
+      
+      // Add nth-child if multiple siblings
+      const parent = current.parentElement;
+      if (parent) {
+        const siblings = Array.from(parent.children);
+        if (siblings.length > 1) {
+          const index = siblings.indexOf(current) + 1;
+          selector += `:nth-child(${index})`;
+        }
+      }
+      
+      path.unshift(selector);
+      current = current.parentElement;
+    }
+    
+    return path.join(' > ');
+  } catch (error) {
+    console.error('[Autofill Scanner] Error generating selector:', error.message);
+    return '';
+  }
+}
+
+/**
+ * Extract metadata from input field
+ * @param {HTMLInputElement} inputElement - Input field
+ * @returns {Object} - Field metadata object
+ */
+function extractFieldMetadata(inputElement) {
+  try {
+    return {
+      id: inputElement.id || generateUniqueId('field'),
+      name: inputElement.name || '',
+      type: inputElement.type || 'text',
+      label: findAssociatedLabel(inputElement),
+      placeholder: inputElement.placeholder || '',
+      ariaLabel: inputElement.getAttribute('aria-label') || null,
+      required: inputElement.required || inputElement.hasAttribute('required'),
+      value: '', // NEVER read actual value (privacy requirement)
+      selector: generateCSSSelector(inputElement)
+    };
+  } catch (error) {
+    console.error('[Autofill Scanner] Error extracting field metadata:', error.message);
+    return null;
+  }
+}
