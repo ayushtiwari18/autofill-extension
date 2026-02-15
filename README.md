@@ -17,17 +17,19 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
 - **JavaScript** (no TypeScript)
 - **Web Crypto API** for AES encryption
 - **chrome.storage.local** for encrypted data persistence
+- **Content Script** for read-only form scanning
+- **MutationObserver** for dynamic form detection
 
 ## 📦 Core Components
 1. **Popup UI** (React) - Profile management and controls
-2. **Background Service Worker** - Event coordination
-3. **Content Script** - Form scanning (read-only)
+2. **Background Service Worker** - Event coordination and message handling
+3. **Content Script Scanner** - Form detection and metadata extraction
 4. **Field Mapping Engine** - Rule-based field matcher
 5. **Profile Storage Engine** - Encrypted data persistence
 6. **Adapter Layer** - Form-specific handlers (Google Forms, Generic HTML)
 
 ## 🎯 Supported Forms
-- ✅ Google Forms
+- ✅ Google Forms (iframe detection)
 - ✅ Generic HTML forms
 - 🔜 LinkedIn (future extensibility)
 
@@ -41,9 +43,9 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
  │   └── icon128.png
  ├── src/
  │   ├── background/
- │   │   └── serviceWorker.js
+ │   │   └── serviceWorker.js ✅
  │   ├── content/
- │   │   └── scanner.js
+ │   │   └── scanner.js ✅
  │   ├── adapters/
  │   │   ├── googleForms.js
  │   │   └── genericForm.js
@@ -73,6 +75,8 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
 - Random salt and IV generation per encryption
 - Password never stored (user must enter each session)
 - Encrypted profile data in chrome.storage.local
+- **Content script never reads field values** (privacy guarantee)
+- **Read-only form scanning** (no DOM modification)
 - Minimal manifest permissions (storage, activeTab, scripting)
 - No inline JavaScript
 - No unsafe eval
@@ -87,49 +91,32 @@ Confidence = labelMatch(0.5) + placeholderMatch(0.3) + historyMatch(0.2)
 Threshold: score >= 0.6
 ```
 
-## 📊 Data Storage Schema (Version 1.0)
+## 📊 Form Scan Data Structure
 ```json
 {
-  "version": "1.0",
-  "profile": {
-    "personal": {
-      "firstName": "",
-      "lastName": "",
-      "email": "",
-      "phone": "",
-      "address": "",
-      "city": "",
-      "state": "",
-      "zipCode": "",
-      "country": ""
-    },
-    "education": {
-      "degree": "",
-      "major": "",
-      "university": "",
-      "graduationYear": "",
-      "gpa": ""
-    },
-    "experience": {
-      "currentRole": "",
-      "currentCompany": "",
-      "yearsOfExperience": "",
-      "skills": []
-    },
-    "links": {
-      "linkedin": "",
-      "github": "",
-      "portfolio": "",
-      "website": ""
-    },
-    "documents": {
-      "resume": null
+  "url": "https://example.com/apply",
+  "title": "Job Application",
+  "forms": [
+    {
+      "id": "application-form",
+      "type": "generic",
+      "hasCaptcha": false,
+      "fields": [
+        {
+          "id": "firstName",
+          "name": "firstName",
+          "type": "text",
+          "label": "First Name",
+          "placeholder": "Enter first name",
+          "required": true,
+          "selector": "#firstName"
+        }
+      ],
+      "action": "/submit",
+      "method": "POST"
     }
-  },
-  "metadata": {
-    "createdAt": "",
-    "updatedAt": ""
-  }
+  ],
+  "scannedAt": "2026-02-15T12:30:00.000Z"
 }
 ```
 
@@ -137,11 +124,13 @@ Threshold: score >= 0.6
 - CAPTCHA detection → disable autofill
 - No form detected → user notification
 - Multiple forms → user selection UI
+- Hidden forms → automatically excluded
+- Dynamic forms → MutationObserver re-scans (max 3)
+- Google Forms iframe → detected but content inaccessible
 - Corrupted encrypted data → reset with warning
 - Storage quota exceeded → clear error message
 - Pre-filled fields → no override without confirmation
 - Missing resume input → skip gracefully
-- Dynamic rendering delays → observer pattern
 
 ## 🚀 Development Phases
 
@@ -174,10 +163,20 @@ Threshold: score >= 0.6
 - [x] Size validation (5MB recommended limit)
 - [x] Quota error handling
 
-### 📍 Current Status: PHASE 3 COMPLETE ✅
+### ✅ PHASE 4 - COMPLETE
+- [x] Content script scanner implementation
+- [x] Form detection (visible forms only)
+- [x] Field metadata extraction (labels, types, selectors)
+- [x] Google Forms iframe detection
+- [x] CAPTCHA detection (reCAPTCHA, hCaptcha)
+- [x] MutationObserver for dynamic forms
+- [x] Message protocol with background script
+- [x] Manifest content_scripts configuration
+- [x] Privacy-safe scanning (no field values read)
+
+### 📍 Current Status: PHASE 4 COMPLETE ✅
 
 ### Upcoming Phases
-- [ ] Phase 4: Content script scanner
 - [ ] Phase 5: Field mapping engine
 - [ ] Phase 6: React popup UI (full)
 - [ ] Phase 7: Autofill executor
@@ -286,6 +285,17 @@ await saveProfile(profile, 'password123');
 
 const loaded = await loadProfile('password123');
 console.log(loaded.profile.personal.firstName); // 'John'
+```
+
+### Phase 4: Form Scanner
+```javascript
+// Scanner runs automatically on page load
+// Open browser console on any page with forms
+// Look for: "[Autofill Scanner] Found X form(s)"
+
+// Check background service worker console:
+// chrome://extensions/ → Service Worker → Inspect
+// Should see: "Forms scanned on [URL]: X form(s)"
 ```
 
 ## 📄 License
