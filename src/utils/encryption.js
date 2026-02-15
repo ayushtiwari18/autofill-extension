@@ -114,3 +114,63 @@ export async function deriveKey(password, salt) {
 
   return key;
 }
+
+/**
+ * Encrypt data object using AES-GCM
+ * @param {Object} data - JavaScript object to encrypt (will be JSON stringified)
+ * @param {string} password - User's encryption password
+ * @returns {Promise<Object>} - Object with { salt, iv, ciphertext } in base64
+ * @throws {Error} - If encryption fails or Web Crypto unavailable
+ */
+export async function encrypt(data, password) {
+  if (!isWebCryptoAvailable()) {
+    throw new Error('Web Crypto API is not available in this browser');
+  }
+
+  if (!password || typeof password !== 'string' || password.length === 0) {
+    throw new Error('Password cannot be empty');
+  }
+
+  // Validate data is serializable
+  let jsonString;
+  try {
+    jsonString = JSON.stringify(data);
+  } catch (error) {
+    throw new Error('Data cannot be serialized to JSON');
+  }
+
+  // Generate random salt
+  const salt = window.crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
+
+  // Derive encryption key
+  const key = await deriveKey(password, salt);
+
+  // Generate random IV
+  const iv = window.crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+
+  // Convert JSON string to ArrayBuffer
+  const encoder = new TextEncoder();
+  const dataBuffer = encoder.encode(jsonString);
+
+  // Encrypt using AES-GCM
+  let ciphertext;
+  try {
+    ciphertext = await window.crypto.subtle.encrypt(
+      {
+        name: 'AES-GCM',
+        iv: iv
+      },
+      key,
+      dataBuffer
+    );
+  } catch (error) {
+    throw new Error('Encryption operation failed');
+  }
+
+  // Return encrypted data with salt and IV in base64
+  return {
+    salt: arrayBufferToBase64(salt),
+    iv: arrayBufferToBase64(iv),
+    ciphertext: arrayBufferToBase64(ciphertext)
+  };
+}
