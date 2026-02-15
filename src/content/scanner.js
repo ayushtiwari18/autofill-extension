@@ -12,6 +12,12 @@ const MAX_RESCANS = 3; // Maximum re-scans per page
 const FORM_FIELD_SELECTORS = 'input:not([type="submit"]):not([type="button"]), textarea, select';
 
 // ============================================
+// STATE
+// ============================================
+let scanCount = 0;
+let mutationObserver = null;
+
+// ============================================
 // UTILITY FUNCTIONS
 // ============================================
 
@@ -361,7 +367,7 @@ function scanPage() {
     
     forms.forEach(form => {
       const formData = scanForm(form);
-      if (formData && formData.fields.length > 0 || formData.type === 'google-forms') {
+      if (formData && (formData.fields.length > 0 || formData.type === 'google-forms')) {
         scannedForms.push(formData);
       }
     });
@@ -382,3 +388,112 @@ function scanPage() {
     };
   }
 }
+
+// ============================================
+// COMMUNICATION
+// ============================================
+
+/**
+ * Send scan results to background script
+ * @param {Object} pageData - Scanned page data
+ * @returns {Promise<void>}
+ */
+function sendFormDataToBackground(pageData) {
+  try {
+    if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+      chrome.runtime.sendMessage({
+        type: 'FORM_DATA_SCANNED',
+        data: pageData
+      });
+    }
+  } catch (error) {
+    console.error('[Autofill Scanner] Error sending data to background:', error.message);
+  }
+}
+
+// ============================================
+// MUTATION OBSERVER
+// ============================================
+
+/**
+ * Handle DOM mutations (debounced)
+ */
+const handleMutations = debounce(() => {
+  if (scanCount < MAX_RESCANS) {
+    scanCount++;
+    console.log(`[Autofill Scanner] Re-scanning page (${scanCount}/${MAX_RESCANS})`);
+    const pageData = scanPage();
+    sendFormDataToBackground(pageData);
+  } else {
+    console.log('[Autofill Scanner] Max re-scans reached, disconnecting observer');
+    if (mutationObserver) {
+      mutationObserver.disconnect();
+    }
+  }
+}, SCAN_DELAY_MS);
+
+/**
+ * Watch for dynamic form additions/changes
+ * @returns {MutationObserver} - Observer instance
+ */
+function observeDOMChanges() {
+  try {
+    const observer = new MutationObserver((mutations) => {
+      // Check if forms were added
+      const formsAdded = mutations.some(mutation => {
+        return Array.from(mutation.addedNodes).some(node => {
+          if (node.nodeType !== Node.ELEMENT_NODE) return false;
+          return node.nodeName === 'FORM' || 
+                 (node.querySelectorAll && node.querySelectorAll('form').length > 0);
+        });
+      });
+      
+      if (formsAdded) {
+        handleMutations();
+      }
+    });
+    
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+    
+    return observer;
+  } catch (error) {
+    console.error('[Autofill Scanner] Error setting up MutationObserver:', error.message);
+    return null;
+  }
+}
+
+// ============================================
+// INITIALIZATION
+// ============================================
+
+/**
+ * Initialize scanner on page load
+ */
+async function init() {
+  try {
+    console.log('[Autofill Scanner] Initializing...');
+    
+    // Wait for page to be ready
+    await isPageReady();
+    
+    // Perform initial scan
+    const pageData = scanPage();
+    console.log(`[Autofill Scanner] Found ${pageData.forms.length} form(s)`);
+    
+    // Send results to background
+    sendFormDataToBackground(pageData);
+    
+    // Set up observer for dynamic content
+    mutationObserver = observeDOMChanges();
+    
+    console.log('[Autofill Scanner] Initialization complete');
+  } catch (error) {
+    console.error('[Autofill Scanner] Initialization error:', error.message);
+  }
+}
+
+// Start scanner when script loads
+init();
