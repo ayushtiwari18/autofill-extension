@@ -115,6 +115,13 @@ export function validateFieldType(formField, profilePath, profileValue) {
  */
 export function matchField(formField, profile) {
   try {
+    console.log('[Mapper] Matching field:', {
+      name: formField.name,
+      label: formField.label,
+      placeholder: formField.placeholder,
+      type: formField.type
+    });
+    
     const allPaths = getAllProfilePaths();
     let bestMatch = null;
     let bestScore = 0;
@@ -135,16 +142,20 @@ export function matchField(formField, profile) {
       // Apply pattern weight
       const finalScore = confidenceResult.score * pattern.weight;
       
+      console.log(`[Mapper]   ${profilePath}: score=${finalScore.toFixed(3)}, matched=${confidenceResult.matchedOn.join(', ')}`);
+      
       if (finalScore > bestScore) {
         const profileValue = getProfileFieldValue(profile, profilePath);
         
         // Validate type
         if (!validateFieldType(formField, profilePath, profileValue)) {
+          console.log(`[Mapper]     ❌ Type validation failed`);
           continue;
         }
         
         // Skip if profile value is empty
         if (profileValue === null || profileValue === undefined || profileValue === '') {
+          console.log(`[Mapper]     ❌ Profile value is empty`);
           continue;
         }
         
@@ -153,6 +164,8 @@ export function matchField(formField, profile) {
         if (Array.isArray(profileValue)) {
           displayValue = profileValue.join(', ');
         }
+        
+        console.log(`[Mapper]     ✅ BEST MATCH! value="${displayValue}"`);
         
         bestScore = finalScore;
         bestMatch = {
@@ -167,6 +180,12 @@ export function matchField(formField, profile) {
           requiresReview: finalScore < 0.8
         };
       }
+    }
+    
+    if (bestMatch) {
+      console.log(`[Mapper] ✅ Field matched:`, bestMatch);
+    } else {
+      console.log(`[Mapper] ❌ No match found for field`);
     }
     
     return bestMatch;
@@ -188,12 +207,16 @@ export function matchField(formField, profile) {
  */
 export function mapProfileToForm(profile, formData) {
   try {
+    console.log('[Mapper] Starting mapping with profile:', profile);
+    console.log('[Mapper] Form data:', formData);
+    
     const matches = [];
     const unmatchedFormFields = [];
     const usedProfilePaths = new Set();
     
     // Validate inputs
     if (!profile || !formData || !formData.forms) {
+      console.error('[Mapper] Invalid input data');
       return {
         matches: [],
         unmatchedFormFields: [],
@@ -205,6 +228,8 @@ export function mapProfileToForm(profile, formData) {
         error: 'Invalid input data'
       };
     }
+    
+    console.log(`[Mapper] Processing ${formData.forms.length} form(s)`);
     
     // Process each form
     for (const form of formData.forms) {
@@ -219,6 +244,8 @@ export function mapProfileToForm(profile, formData) {
         console.log('[Mapper] Skipping Google Forms iframe:', form.id);
         continue;
       }
+      
+      console.log(`[Mapper] Processing form with ${form.fields.length} field(s)`);
       
       // Match each field
       for (const formField of form.fields) {
@@ -237,6 +264,8 @@ export function mapProfileToForm(profile, formData) {
         }
       }
     }
+    
+    console.log(`[Mapper] Found ${matches.length} match(es), ${unmatchedFormFields.length} unmatched field(s)`);
     
     // Find unused profile fields (have values but not matched)
     const allProfilePaths = getAllProfilePaths();
@@ -260,7 +289,7 @@ export function mapProfileToForm(profile, formData) {
       ? matches.reduce((sum, m) => sum + m.confidence, 0) / matches.length
       : 0;
     
-    return {
+    const result = {
       matches,
       unmatchedFormFields,
       unmatchedProfileFields,
@@ -269,6 +298,10 @@ export function mapProfileToForm(profile, formData) {
       url: formData.url,
       timestamp: new Date().toISOString()
     };
+    
+    console.log('[Mapper] Mapping complete:', result);
+    
+    return result;
   } catch (error) {
     console.error('[Mapper] Error mapping profile to form:', error.message);
     return {
