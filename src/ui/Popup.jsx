@@ -6,6 +6,9 @@ import Review from './Review.jsx';
 import { loadProfile } from '../storage/profileStore.js';
 import './styles.css';
 
+// Storage key (must match profileStore.js)
+const STORAGE_KEY = 'autofill_extension_profile';
+
 // Create App Context
 export const AppContext = createContext();
 
@@ -35,14 +38,16 @@ function Popup() {
 
   const checkProfileExists = async () => {
     try {
-      // Try to get encrypted profile from storage
-      const result = await chrome.storage.local.get(['encryptedProfile']);
+      // Try to get encrypted profile from storage using correct key
+      const result = await chrome.storage.local.get([STORAGE_KEY]);
       
-      if (result.encryptedProfile) {
+      if (result[STORAGE_KEY]) {
         // Profile exists, show login
+        console.log('[Popup] Profile detected, showing login screen');
         setCurrentScreen('login');
       } else {
         // No profile, show create screen
+        console.log('[Popup] No profile found, showing create screen');
         setCurrentScreen('create');
       }
     } catch (err) {
