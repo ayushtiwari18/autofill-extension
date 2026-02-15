@@ -174,3 +174,79 @@ export async function encrypt(data, password) {
     ciphertext: arrayBufferToBase64(ciphertext)
   };
 }
+
+/**
+ * Decrypt encrypted data object using AES-GCM
+ * @param {Object} encryptedData - Object with { salt, iv, ciphertext } in base64
+ * @param {string} password - User's encryption password
+ * @returns {Promise<Object>} - Decrypted JavaScript object
+ * @throws {Error} - If decryption fails, wrong password, or corrupted data
+ */
+export async function decrypt(encryptedData, password) {
+  if (!isWebCryptoAvailable()) {
+    throw new Error('Web Crypto API is not available in this browser');
+  }
+
+  if (!password || typeof password !== 'string' || password.length === 0) {
+    throw new Error('Password cannot be empty');
+  }
+
+  // Validate encrypted data structure
+  if (!encryptedData || typeof encryptedData !== 'object') {
+    throw new Error('Invalid encrypted data format');
+  }
+
+  if (!encryptedData.salt || !encryptedData.iv || !encryptedData.ciphertext) {
+    throw new Error('Invalid encrypted data format - missing required fields');
+  }
+
+  // Decode base64 strings to ArrayBuffers
+  let salt, iv, ciphertext;
+  try {
+    salt = new Uint8Array(base64ToArrayBuffer(encryptedData.salt));
+    iv = new Uint8Array(base64ToArrayBuffer(encryptedData.iv));
+    ciphertext = base64ToArrayBuffer(encryptedData.ciphertext);
+  } catch (error) {
+    throw new Error('Corrupted encrypted data - invalid base64 encoding');
+  }
+
+  // Validate salt and IV lengths
+  if (salt.length !== SALT_LENGTH) {
+    throw new Error('Corrupted encrypted data - invalid salt length');
+  }
+  if (iv.length !== IV_LENGTH) {
+    throw new Error('Corrupted encrypted data - invalid IV length');
+  }
+
+  // Derive key from password and salt
+  const key = await deriveKey(password, salt);
+
+  // Decrypt using AES-GCM
+  let decryptedBuffer;
+  try {
+    decryptedBuffer = await window.crypto.subtle.decrypt(
+      {
+        name: 'AES-GCM',
+        iv: iv
+      },
+      key,
+      ciphertext
+    );
+  } catch (error) {
+    throw new Error('Decryption failed - incorrect password or corrupted data');
+  }
+
+  // Convert decrypted ArrayBuffer to string
+  const decoder = new TextDecoder();
+  const jsonString = decoder.decode(decryptedBuffer);
+
+  // Parse JSON back to object
+  let data;
+  try {
+    data = JSON.parse(jsonString);
+  } catch (error) {
+    throw new Error('Corrupted decrypted data - invalid JSON');
+  }
+
+  return data;
+}
