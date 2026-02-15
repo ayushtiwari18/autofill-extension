@@ -4,6 +4,8 @@
  * Read-only operations - never modifies DOM or reads field values
  */
 
+import { executeAutofill } from './executor.js';
+
 // ============================================
 // CONSTANTS
 // ============================================
@@ -411,6 +413,61 @@ function sendFormDataToBackground(pageData) {
   }
 }
 
+/**
+ * Handle AUTOFILL message from popup
+ * @param {Object} message - Message with matches array
+ * @param {Function} sendResponse - Response callback
+ */
+function handleAutofillMessage(message, sendResponse) {
+  try {
+    console.log('[Scanner] Executing autofill for', message.matches.length, 'fields');
+    
+    // Execute autofill
+    const results = executeAutofill(message.matches);
+    
+    // Send success response
+    sendResponse({
+      success: true,
+      results: results
+    });
+    
+  } catch (error) {
+    console.error('[Scanner] Autofill error:', error);
+    
+    // Send error response
+    sendResponse({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Message listener for popup communication
+ */
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log('[Scanner] Received message:', message.action);
+  
+  switch (message.action) {
+    case 'AUTOFILL':
+      handleAutofillMessage(message, sendResponse);
+      return true; // Keep channel open for async response
+      
+    case 'SCAN_PAGE':
+      // Manual scan request from popup
+      const pageData = scanPage();
+      sendFormDataToBackground(pageData);
+      sendResponse({ success: true, data: pageData });
+      return true;
+      
+    default:
+      console.log('[Scanner] Unknown action:', message.action);
+      sendResponse({ success: false, error: 'Unknown action' });
+  }
+  
+  return false;
+});
+
 // ============================================
 // MUTATION OBSERVER
 // ============================================
@@ -489,7 +546,7 @@ async function init() {
     // Set up observer for dynamic content
     mutationObserver = observeDOMChanges();
     
-    console.log('[Autofill Scanner] Initialization complete');
+    console.log('[Autofill Scanner] Initialization complete - Phase 7');
   } catch (error) {
     console.error('[Autofill Scanner] Initialization error:', error.message);
   }
