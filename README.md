@@ -52,7 +52,7 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
  │   │   ├── confidence.js
  │   │   └── rules.js
  │   ├── storage/
- │   │   └── profileStore.js
+ │   │   └── profileStore.js ✅
  │   ├── ui/
  │   │   ├── Popup.jsx
  │   │   ├── Review.jsx
@@ -71,6 +71,8 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
 - AES-GCM encryption for all stored data (256-bit keys)
 - PBKDF2 key derivation (100,000 iterations, SHA-256)
 - Random salt and IV generation per encryption
+- Password never stored (user must enter each session)
+- Encrypted profile data in chrome.storage.local
 - Minimal manifest permissions (storage, activeTab, scripting)
 - No inline JavaScript
 - No unsafe eval
@@ -85,15 +87,48 @@ Confidence = labelMatch(0.5) + placeholderMatch(0.3) + historyMatch(0.2)
 Threshold: score >= 0.6
 ```
 
-## 📊 Data Storage Schema
+## 📊 Data Storage Schema (Version 1.0)
 ```json
 {
   "version": "1.0",
   "profile": {
-    "personal": {},
-    "education": {},
-    "links": {},
-    "documents": {}
+    "personal": {
+      "firstName": "",
+      "lastName": "",
+      "email": "",
+      "phone": "",
+      "address": "",
+      "city": "",
+      "state": "",
+      "zipCode": "",
+      "country": ""
+    },
+    "education": {
+      "degree": "",
+      "major": "",
+      "university": "",
+      "graduationYear": "",
+      "gpa": ""
+    },
+    "experience": {
+      "currentRole": "",
+      "currentCompany": "",
+      "yearsOfExperience": "",
+      "skills": []
+    },
+    "links": {
+      "linkedin": "",
+      "github": "",
+      "portfolio": "",
+      "website": ""
+    },
+    "documents": {
+      "resume": null
+    }
+  },
+  "metadata": {
+    "createdAt": "",
+    "updatedAt": ""
   }
 }
 ```
@@ -103,6 +138,7 @@ Threshold: score >= 0.6
 - No form detected → user notification
 - Multiple forms → user selection UI
 - Corrupted encrypted data → reset with warning
+- Storage quota exceeded → clear error message
 - Pre-filled fields → no override without confirmation
 - Missing resume input → skip gracefully
 - Dynamic rendering delays → observer pattern
@@ -127,10 +163,20 @@ Threshold: score >= 0.6
 - [x] Base64 encoding utilities
 - [x] Input validation for all functions
 
-### 📍 Current Status: PHASE 2 COMPLETE ✅
+### ✅ PHASE 3 - COMPLETE
+- [x] Chrome Storage API feature detection
+- [x] Profile schema initialization (version 1.0)
+- [x] Profile structure validation
+- [x] Save encrypted profile to chrome.storage.local
+- [x] Load and decrypt profile from storage
+- [x] Delete profile from storage
+- [x] Storage usage monitoring (quota tracking)
+- [x] Size validation (5MB recommended limit)
+- [x] Quota error handling
+
+### 📍 Current Status: PHASE 3 COMPLETE ✅
 
 ### Upcoming Phases
-- [ ] Phase 3: Profile storage engine
 - [ ] Phase 4: Content script scanner
 - [ ] Phase 5: Field mapping engine
 - [ ] Phase 6: React popup UI (full)
@@ -204,7 +250,7 @@ npm run build
 
 ### Verify Installation
 - Extension icon appears in Chrome toolbar
-- Clicking icon opens popup with "Phase 1 Complete ✓" message
+- Clicking icon opens popup
 - No console errors in popup or background service worker
 - Check console: Right-click extension popup → Inspect → Console
 
@@ -217,33 +263,29 @@ npm run clean
 npm run build
 ```
 
-## 🧪 Testing Phase 2 Encryption Module
+## 🧪 Testing Modules
 
-To test the encryption utilities in browser console:
-
+### Phase 2: Encryption Module
 ```javascript
-// Import the module (after building)
-import { isWebCryptoAvailable, encrypt, decrypt } from './src/utils/encryption.js';
+import { encrypt, decrypt } from './src/utils/encryption.js';
 
-// Test 1: Feature detection
-console.log('Web Crypto available:', isWebCryptoAvailable());
-
-// Test 2: Encrypt and decrypt
-const testData = { name: 'John Doe', email: 'test@example.com' };
-const password = 'SecurePassword123';
-
-const encrypted = await encrypt(testData, password);
-console.log('Encrypted:', encrypted);
-
+const data = { test: 'data' };
+const password = 'SecurePass123';
+const encrypted = await encrypt(data, password);
 const decrypted = await decrypt(encrypted, password);
-console.log('Decrypted:', decrypted);
+console.log(decrypted); // { test: 'data' }
+```
 
-// Test 3: Wrong password (should throw error)
-try {
-  await decrypt(encrypted, 'WrongPassword');
-} catch (error) {
-  console.log('Expected error:', error.message);
-}
+### Phase 3: Profile Storage
+```javascript
+import { initializeProfile, saveProfile, loadProfile } from './src/storage/profileStore.js';
+
+const profile = initializeProfile();
+profile.profile.personal.firstName = 'John';
+await saveProfile(profile, 'password123');
+
+const loaded = await loadProfile('password123');
+console.log(loaded.profile.personal.firstName); // 'John'
 ```
 
 ## 📄 License
