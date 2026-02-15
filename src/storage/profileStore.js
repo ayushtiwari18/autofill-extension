@@ -174,3 +174,46 @@ export async function saveProfile(profile, password) {
     throw new Error(`Failed to save profile: ${error.message}`);
   }
 }
+
+/**
+ * Load and decrypt profile from chrome.storage.local
+ * @param {string} password - Decryption password
+ * @returns {Promise<Object|null>} - Decrypted profile or null if none exists
+ * @throws {Error} - If decryption fails or wrong password
+ */
+export async function loadProfile(password) {
+  // Check Chrome Storage API availability
+  if (!isChromeStorageAvailable()) {
+    throw new Error('Chrome Storage API is not available');
+  }
+
+  // Retrieve encrypted data from storage
+  let result;
+  try {
+    result = await chrome.storage.local.get(STORAGE_KEY);
+  } catch (error) {
+    throw new Error(`Failed to load profile: ${error.message}`);
+  }
+
+  // Check if profile exists
+  const encryptedData = result[STORAGE_KEY];
+  if (!encryptedData) {
+    return null; // No profile stored (first use)
+  }
+
+  // Decrypt profile
+  let profile;
+  try {
+    profile = await decrypt(encryptedData, password);
+  } catch (error) {
+    // Propagate decryption errors (wrong password or corrupted data)
+    throw error;
+  }
+
+  // Validate decrypted profile structure
+  if (!validateProfile(profile)) {
+    throw new Error('Stored profile data is corrupted');
+  }
+
+  return profile;
+}
