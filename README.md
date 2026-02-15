@@ -19,12 +19,13 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
 - **chrome.storage.local** for encrypted data persistence
 - **Content Script** for read-only form scanning
 - **MutationObserver** for dynamic form detection
+- **Rule-based Field Mapper** with confidence scoring
 
 ## 📦 Core Components
 1. **Popup UI** (React) - Profile management and controls
 2. **Background Service Worker** - Event coordination and message handling
 3. **Content Script Scanner** - Form detection and metadata extraction
-4. **Field Mapping Engine** - Rule-based field matcher
+4. **Field Mapping Engine** - Rule-based field matcher with confidence scores
 5. **Profile Storage Engine** - Encrypted data persistence
 6. **Adapter Layer** - Form-specific handlers (Google Forms, Generic HTML)
 
@@ -50,9 +51,9 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
  │   │   ├── googleForms.js
  │   │   └── genericForm.js
  │   ├── engine/
- │   │   ├── mapper.js
- │   │   ├── confidence.js
- │   │   └── rules.js
+ │   │   ├── mapper.js ✅
+ │   │   ├── confidence.js ✅
+ │   │   └── rules.js ✅
  │   ├── storage/
  │   │   └── profileStore.js ✅
  │   ├── ui/
@@ -77,6 +78,7 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
 - Encrypted profile data in chrome.storage.local
 - **Content script never reads field values** (privacy guarantee)
 - **Read-only form scanning** (no DOM modification)
+- **Profile values never logged** (only field names and scores)
 - Minimal manifest permissions (storage, activeTab, scripting)
 - No inline JavaScript
 - No unsafe eval
@@ -84,39 +86,57 @@ A production-grade Chrome extension for intelligently autofilling job applicatio
 - Data never leaves the browser
 
 ## 🧠 Field Mapping Strategy
-Rule-based matching with confidence scoring:
+
+### Rule-Based Matching with Confidence Scoring
 ```
-Priority: Label text → Placeholder → aria-label → name attribute
-Confidence = labelMatch(0.5) + placeholderMatch(0.3) + historyMatch(0.2)
-Threshold: score >= 0.6
+Label Match Weight:        50%
+Placeholder Match Weight:  30%
+Name Attribute Weight:     15%
+aria-label Weight:         5%
+
+Fuzzy Matching:
+- Exact match:     score = 1.0
+- Contains match:  score = 0.85
+- Levenshtein:     score = 0.5-1.0
+
+Confidence Thresholds:
+- High (>= 0.8):   Auto-fill
+- Medium (0.6-0.8): Highlight for review
+- Low (< 0.6):     Skip
 ```
 
-## 📊 Form Scan Data Structure
+### Supported Profile Fields (25 Total)
+- **Personal**: firstName, lastName, email, phone, address, city, state, zipCode, country
+- **Education**: degree, major, university, graduationYear, gpa
+- **Experience**: currentRole, currentCompany, yearsOfExperience, skills
+- **Links**: linkedin, github, portfolio, website
+- **Documents**: resume (file upload)
+
+## 📊 Mapping Output Structure
 ```json
 {
-  "url": "https://example.com/apply",
-  "title": "Job Application",
-  "forms": [
+  "matches": [
     {
-      "id": "application-form",
-      "type": "generic",
-      "hasCaptcha": false,
-      "fields": [
-        {
-          "id": "firstName",
-          "name": "firstName",
-          "type": "text",
-          "label": "First Name",
-          "placeholder": "Enter first name",
-          "required": true,
-          "selector": "#firstName"
-        }
-      ],
-      "action": "/submit",
-      "method": "POST"
+      "formFieldId": "firstName",
+      "formFieldSelector": "#firstName",
+      "formFieldLabel": "First Name",
+      "profilePath": "profile.personal.firstName",
+      "profileValue": "John",
+      "confidence": 0.95,
+      "matchedOn": "label",
+      "requiresReview": false
     }
   ],
-  "scannedAt": "2026-02-15T12:30:00.000Z"
+  "unmatchedFormFields": [
+    { "id": "customField", "label": "Custom Question", "type": "text" }
+  ],
+  "unmatchedProfileFields": [
+    { "path": "profile.personal.middleName", "value": "" }
+  ],
+  "overallConfidence": 0.87,
+  "requiresReview": false,
+  "url": "https://example.com/apply",
+  "timestamp": "2026-02-15T12:46:00.000Z"
 }
 ```
 
@@ -127,10 +147,13 @@ Threshold: score >= 0.6
 - Hidden forms → automatically excluded
 - Dynamic forms → MutationObserver re-scans (max 3)
 - Google Forms iframe → detected but content inaccessible
+- Ambiguous field names → best match with confidence score
+- Type mismatches → validation prevents bad matches
+- Empty profile values → skipped automatically
+- Negative keywords → prevent false positives
+- Array values (skills) → joined with commas
 - Corrupted encrypted data → reset with warning
 - Storage quota exceeded → clear error message
-- Pre-filled fields → no override without confirmation
-- Missing resume input → skip gracefully
 
 ## 🚀 Development Phases
 
@@ -174,10 +197,21 @@ Threshold: score >= 0.6
 - [x] Manifest content_scripts configuration
 - [x] Privacy-safe scanning (no field values read)
 
-### 📍 Current Status: PHASE 4 COMPLETE ✅
+### ✅ PHASE 5 - COMPLETE
+- [x] Field pattern definitions (25 profile fields)
+- [x] Field aliases and synonyms
+- [x] Negative keywords (prevent false matches)
+- [x] Text normalization and fuzzy matching
+- [x] Levenshtein distance algorithm
+- [x] Confidence scoring (weighted attributes)
+- [x] Profile value extraction (dot notation)
+- [x] Type validation (email, phone, number, url)
+- [x] Complete profile-to-form mapping
+- [x] Match filtering (confidence threshold >= 0.6)
+
+### 📍 Current Status: PHASE 5 COMPLETE ✅
 
 ### Upcoming Phases
-- [ ] Phase 5: Field mapping engine
 - [ ] Phase 6: React popup UI (full)
 - [ ] Phase 7: Autofill executor
 - [ ] Phase 8: Adapter implementations
@@ -296,6 +330,23 @@ console.log(loaded.profile.personal.firstName); // 'John'
 // Check background service worker console:
 // chrome://extensions/ → Service Worker → Inspect
 // Should see: "Forms scanned on [URL]: X form(s)"
+```
+
+### Phase 5: Field Mapper
+```javascript
+import { mapProfileToForm } from './src/engine/mapper.js';
+import { loadProfile } from './src/storage/profileStore.js';
+
+// Load profile
+const profile = await loadProfile('password123');
+
+// Get form data from scanner (via background script)
+// formData = { url, title, forms: [...] }
+
+// Map profile to form
+const mapping = mapProfileToForm(profile, formData);
+console.log(`Matched ${mapping.matches.length} fields`);
+console.log(`Overall confidence: ${mapping.overallConfidence}`);
 ```
 
 ## 📄 License
