@@ -118,3 +118,59 @@ export function initializeProfile() {
     }
   };
 }
+
+/**
+ * Save encrypted profile to chrome.storage.local
+ * @param {Object} profile - Profile object to save
+ * @param {string} password - Encryption password
+ * @returns {Promise<void>} - Resolves on success
+ * @throws {Error} - If save fails, quota exceeded, or invalid profile
+ */
+export async function saveProfile(profile, password) {
+  // Check Chrome Storage API availability
+  if (!isChromeStorageAvailable()) {
+    throw new Error('Chrome Storage API is not available');
+  }
+
+  // Validate profile structure
+  if (!validateProfile(profile)) {
+    throw new Error('Invalid profile structure');
+  }
+
+  // Update metadata timestamp
+  const profileToSave = {
+    ...profile,
+    metadata: {
+      ...profile.metadata,
+      updatedAt: new Date().toISOString()
+    }
+  };
+
+  // Encrypt profile
+  let encryptedData;
+  try {
+    encryptedData = await encrypt(profileToSave, password);
+  } catch (error) {
+    // Propagate encryption errors
+    throw error;
+  }
+
+  // Calculate and validate size
+  const sizeInBytes = calculateProfileSize(encryptedData);
+  if (sizeInBytes > MAX_RECOMMENDED_SIZE) {
+    throw new Error(
+      `Profile size (${(sizeInBytes / 1024 / 1024).toFixed(2)}MB) exceeds recommended limit (5MB). Consider reducing resume size.`
+    );
+  }
+
+  // Save to chrome.storage.local
+  try {
+    await chrome.storage.local.set({ [STORAGE_KEY]: encryptedData });
+  } catch (error) {
+    // Handle quota exceeded error
+    if (error.message && error.message.includes('QUOTA_EXCEEDED')) {
+      throw new Error('Storage quota exceeded - reduce profile size');
+    }
+    throw new Error(`Failed to save profile: ${error.message}`);
+  }
+}
