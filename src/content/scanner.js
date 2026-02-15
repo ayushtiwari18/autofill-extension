@@ -94,3 +94,99 @@ function sanitizeSelectorString(str) {
   // Escape special characters for CSS selectors
   return str.replace(/(["'\\])/g, '\\$1');
 }
+
+// ============================================
+// FORM DETECTION FUNCTIONS
+// ============================================
+
+/**
+ * Detect all visible forms on the page
+ * @returns {HTMLFormElement[]} - Array of form elements
+ */
+function detectForms() {
+  const allForms = document.querySelectorAll('form');
+  const visibleForms = [];
+  
+  allForms.forEach(form => {
+    if (isElementVisible(form)) {
+      visibleForms.push(form);
+    }
+  });
+  
+  // Also check for Google Forms iframes
+  const iframes = document.querySelectorAll('iframe');
+  iframes.forEach(iframe => {
+    if (isElementVisible(iframe) && isGoogleFormsIframe(iframe)) {
+      visibleForms.push(iframe);
+    }
+  });
+  
+  return visibleForms;
+}
+
+/**
+ * Check if iframe is a Google Form
+ * @param {HTMLIFrameElement} iframe - Iframe element
+ * @returns {boolean} - true if Google Forms iframe
+ */
+function isGoogleFormsIframe(iframe) {
+  const src = iframe.src || '';
+  return src.includes('docs.google.com/forms');
+}
+
+/**
+ * Identify the type of form
+ * @param {HTMLElement} formElement - Form to identify
+ * @returns {string} - "google-forms" | "generic" | "unknown"
+ */
+function identifyFormType(formElement) {
+  // Check if it's an iframe (Google Forms)
+  if (formElement.tagName === 'IFRAME') {
+    if (isGoogleFormsIframe(formElement)) {
+      return 'google-forms';
+    }
+    return 'unknown';
+  }
+  
+  // Check for Google Forms indicators in the form element
+  if (formElement.classList && formElement.classList.contains('freebirdForm')) {
+    return 'google-forms';
+  }
+  
+  // Check for Google Forms data attributes
+  if (formElement.hasAttribute('data-freebird-form-id')) {
+    return 'google-forms';
+  }
+  
+  // Default to generic HTML form
+  return 'generic';
+}
+
+/**
+ * Detect if form contains CAPTCHA
+ * @param {HTMLElement} formElement - Form to check
+ * @returns {boolean} - true if CAPTCHA detected
+ */
+function detectCaptcha(formElement) {
+  // Check for reCAPTCHA
+  if (formElement.querySelector('.g-recaptcha') || 
+      formElement.querySelector('iframe[src*="recaptcha"]')) {
+    return true;
+  }
+  
+  // Check for hCaptcha
+  if (formElement.querySelector('.h-captcha') || 
+      formElement.querySelector('iframe[src*="hcaptcha"]')) {
+    return true;
+  }
+  
+  // Check for CAPTCHA keywords in text content
+  const formText = formElement.textContent.toLowerCase();
+  if (formText.includes('captcha') || 
+      formText.includes('recaptcha') || 
+      formText.includes('hcaptcha')) {
+    return true;
+  }
+  
+  return false;
+}
