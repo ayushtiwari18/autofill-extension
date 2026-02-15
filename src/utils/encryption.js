@@ -47,4 +47,17 @@ function base64ToArrayBuffer(base64) {
 // ============================================
 // PUBLIC API
 // ============================================
-// Functions will be added in subsequent commits
+
+/**
+ * Check if Web Crypto API is available in current context
+ * @returns {boolean} - true if crypto.subtle is available and functional
+ */
+export function isWebCryptoAvailable() {
+  return (
+    typeof window !== 'undefined' &&
+    window.crypto &&
+    window.crypto.subtle &&
+    typeof window.crypto.subtle.encrypt === 'function' &&
+    typeof window.crypto.subtle.decrypt === 'function'
+  );
+}
