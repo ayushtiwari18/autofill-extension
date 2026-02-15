@@ -142,7 +142,9 @@ export function matchField(formField, profile) {
       // Apply pattern weight
       const finalScore = confidenceResult.score * pattern.weight;
       
-      console.log(`[Mapper]   ${profilePath}: score=${finalScore.toFixed(3)}, matched=${confidenceResult.matchedOn.join(', ')}`);
+      // matchedOn is a string (like 'label' or 'name'), not an array
+      const matchedStr = confidenceResult.matchedOn || 'none';
+      console.log(`[Mapper]   ${profilePath}: score=${finalScore.toFixed(3)}, matched=${matchedStr}`);
       
       if (finalScore > bestScore) {
         const profileValue = getProfileFieldValue(profile, profilePath);
@@ -176,7 +178,7 @@ export function matchField(formField, profile) {
           profilePath: profilePath,
           profileValue: displayValue,
           confidence: finalScore,
-          matchedOn: confidenceResult.matchedOn,
+          matchedOn: matchedStr, // Store as string
           requiresReview: finalScore < 0.8
         };
       }
