@@ -81,27 +81,51 @@ function Dashboard() {
     setScanning(true);
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab) {
+      if (!tab || !tab.id) {
         alert('No active tab found');
         return;
       }
 
-      // Wait a moment for scanner to run
-      await new Promise(resolve => setTimeout(resolve, 500));
+      console.log('[Dashboard] Triggering manual scan on tab:', tab.id);
 
-      // Get scanned data
-      const response = await chrome.runtime.sendMessage({ action: 'GET_LAST_SCANNED_DATA' });
-      if (response && response.formData) {
-        setFormData(response.formData);
-        setFormsDetected(response.formData.forms ? response.formData.forms.length : 0);
-        setLastScannedUrl(tab.url);
+      // Send scan command to content script
+      const response = await chrome.tabs.sendMessage(tab.id, { action: 'SCAN_PAGE' });
+      
+      if (response && response.success) {
+        console.log('[Dashboard] Scan successful, found', response.data.forms.length, 'forms');
+        
+        // Wait a moment for background to process
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Get scanned data from background
+        const bgResponse = await chrome.runtime.sendMessage({ action: 'GET_LAST_SCANNED_DATA' });
+        
+        if (bgResponse && bgResponse.formData) {
+          setFormData(bgResponse.formData);
+          const numForms = bgResponse.formData.forms ? bgResponse.formData.forms.length : 0;
+          setFormsDetected(numForms);
+          setLastScannedUrl(tab.url);
+          
+          if (numForms === 0) {
+            alert('✅ Page scanned but no forms detected.\n\nMake sure:\n1. The page has <form> tags\n2. Form fields are visible\n3. Fields are not in iframes');
+          } else {
+            console.log('[Dashboard] Successfully detected', numForms, 'form(s)');
+          }
+        }
       } else {
+        console.warn('[Dashboard] Scan returned no data');
         setFormsDetected(0);
         alert('No forms detected on this page');
       }
     } catch (err) {
       console.error('[Dashboard] Scan failed:', err);
-      alert('Failed to scan page');
+      
+      // Check if content script is not injected
+      if (err.message && err.message.includes('Could not establish connection')) {
+        alert('⚠️ Scanner not loaded on this page.\n\nTry:\n1. Refresh the page\n2. Click Scan Page again\n3. Check if page is a chrome:// or extension:// page (not supported)');
+      } else {
+        alert('Failed to scan page: ' + err.message);
+      }
     } finally {
       setScanning(false);
     }
@@ -116,8 +140,19 @@ function Dashboard() {
         return;
       }
 
+      if (!response.formData.forms || response.formData.forms.length === 0) {
+        alert('No forms detected. Click "Scan Page" first.');
+        return;
+      }
+
       // Map profile to form
       const mapping = mapProfileToForm(profile, response.formData);
+      
+      if (!mapping.matches || mapping.matches.length === 0) {
+        alert('No matching fields found between your profile and the detected forms.');
+        return;
+      }
+      
       setMappingResult(mapping);
       setCurrentScreen('review');
     } catch (err) {
@@ -186,7 +221,7 @@ function Dashboard() {
           onClick={handleScanPage}
           disabled={scanning}
         >
-          {scanning ? 'Scanning...' : '🔍 Scan Page'}
+          {scanning ? '🔄 Scanning...' : '🔍 Scan Page'}
         </button>
       </div>
 
