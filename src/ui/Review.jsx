@@ -57,19 +57,51 @@ function Review() {
         return;
       }
 
-      // Send autofill command to content script (Phase 7 implementation)
-      await chrome.tabs.sendMessage(tab.id, {
+      // Send autofill command to content script
+      const response = await chrome.tabs.sendMessage(tab.id, {
         action: 'AUTOFILL',
         matches: editedMatches
       });
 
-      // Show success
-      alert(`Successfully autofilled ${editedMatches.length} fields!`);
-      setCurrentScreen('dashboard');
+      // Handle response
+      if (response && response.success) {
+        const { results } = response;
+        
+        // Build success message
+        let message = `✅ Autofill Complete!\n\n`;
+        message += `✓ Successfully filled: ${results.successCount}/${results.totalFields} fields\n`;
+        
+        if (results.skippedFields.length > 0) {
+          message += `\n⏩ Skipped ${results.skippedFields.length} field(s):\n`;
+          results.skippedFields.forEach(field => {
+            message += `  • ${field.label}: ${field.reason}\n`;
+          });
+        }
+        
+        if (results.failedFields.length > 0) {
+          message += `\n❌ Failed ${results.failedFields.length} field(s):\n`;
+          results.failedFields.forEach(field => {
+            message += `  • ${field.label}: ${field.reason}\n`;
+          });
+        }
+        
+        message += `\n⏱ Completed in ${results.executionTime}ms`;
+        
+        if (results.skippedFields.some(f => f.reason.includes('File'))) {
+          message += `\n\n📎 Note: File uploads must be done manually for security reasons.`;
+        }
+        
+        alert(message);
+        setCurrentScreen('dashboard');
+        
+      } else {
+        const errorMsg = response?.error || 'Unknown error occurred';
+        alert(`❌ Autofill failed:\n\n${errorMsg}`);
+      }
 
     } catch (err) {
       console.error('[Review] Autofill failed:', err);
-      alert('Autofill failed. Phase 7 not yet implemented.');
+      alert(`❌ Autofill failed:\n\n${err.message}\n\nMake sure you're on the same tab where the form was scanned.`);
     } finally {
       setLoading(false);
     }
