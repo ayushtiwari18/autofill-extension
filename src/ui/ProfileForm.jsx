@@ -4,21 +4,44 @@ import { initializeProfile, saveProfile } from '../storage/profileStore.js';
 
 const DRAFT_KEY = 'autofill_profile_draft';
 
+// ── chrome.storage.local draft helpers ──────────────────────────────────────
+async function saveDraft(data) {
+  try {
+    await chrome.storage.local.set({ [DRAFT_KEY]: data });
+    console.log('[ProfileForm] Draft saved to chrome.storage.local');
+  } catch (e) {
+    console.warn('[ProfileForm] Draft save failed:', e.message);
+  }
+}
+
+async function loadDraft() {
+  try {
+    const result = await chrome.storage.local.get(DRAFT_KEY);
+    if (result[DRAFT_KEY]) {
+      console.log('[ProfileForm] Draft restored from chrome.storage.local');
+      return result[DRAFT_KEY];
+    }
+  } catch (e) {
+    console.warn('[ProfileForm] Draft load failed:', e.message);
+  }
+  return null;
+}
+
+async function clearDraft() {
+  try {
+    await chrome.storage.local.remove(DRAFT_KEY);
+    console.log('[ProfileForm] Draft cleared from chrome.storage.local');
+  } catch (e) {}
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 function ProfileForm({ mode, initialProfile = null }) {
   const { setProfile, setPassword, setIsUnlocked, setCurrentScreen } = useAppContext();
 
-  const [formData, setFormData] = useState(() => {
-    // On mount: restore draft from sessionStorage if available, else use initialProfile
-    try {
-      const draft = sessionStorage.getItem(DRAFT_KEY);
-      if (draft) {
-        console.log('[ProfileForm] Restoring unsaved draft from sessionStorage');
-        return JSON.parse(draft);
-      }
-    } catch (e) {}
-    return initialProfile?.profile || initializeProfile().profile;
-  });
-
+  const [formData, setFormData] = useState(
+    initialProfile?.profile || initializeProfile().profile
+  );
+  const [draftLoaded, setDraftLoaded] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [errors, setErrors] = useState({});
@@ -27,18 +50,26 @@ function ProfileForm({ mode, initialProfile = null }) {
   const [draftSaved, setDraftSaved] = useState(false);
   const draftTimer = useRef(null);
 
+  // On mount: restore draft from chrome.storage.local
+  useEffect(() => {
+    loadDraft().then(draft => {
+      if (draft) {
+        setFormData(draft);
+        setDraftLoaded(true);
+        console.log('[ProfileForm] Restored draft — unsaved data recovered');
+      }
+    });
+  }, []);
+
   // Auto-save draft on every formData change (debounced 800ms)
   useEffect(() => {
+    if (!draftLoaded && !initialProfile) return; // skip initial render before draft load
     clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => {
-      try {
-        sessionStorage.setItem(DRAFT_KEY, JSON.stringify(formData));
+      saveDraft(formData).then(() => {
         setDraftSaved(true);
-        console.log('[ProfileForm] Draft auto-saved to sessionStorage');
         setTimeout(() => setDraftSaved(false), 2000);
-      } catch (e) {
-        console.warn('[ProfileForm] Could not save draft:', e.message);
-      }
+      });
     }, 800);
     return () => clearTimeout(draftTimer.current);
   }, [formData]);
@@ -70,20 +101,15 @@ function ProfileForm({ mode, initialProfile = null }) {
     if (errors[field]) setErrors(prev => { const e = { ...prev }; delete e[field]; return e; });
   };
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { setErrors(prev => ({ ...prev, resume: 'File too large (max 2MB)' })); return; }
-    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-    if (!allowedTypes.includes(file.type)) { setErrors(prev => ({ ...prev, resume: 'Invalid file type (PDF, DOC, DOCX only)' })); return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setFormData(prev => ({ ...prev, documents: { resume: reader.result } }));
-      setResumeFileName(file.name);
-      console.log('[ProfileForm] Resume loaded:', file.name, '(', Math.round(file.size / 1024), 'KB)');
-      setErrors(prev => { const e = { ...prev }; delete e.resume; return e; });
-    };
-    reader.readAsDataURL(file);
+  // Resume upload: open options page instead of file picker in popup
+  const handleResumeUploadClick = () => {
+    console.log('[ProfileForm] Resume upload requested — opening options page');
+    if (chrome.runtime.openOptionsPage) {
+      chrome.runtime.openOptionsPage();
+    } else {
+      const optionsUrl = chrome.runtime.getURL('options.html');
+      chrome.tabs.create({ url: optionsUrl });
+    }
   };
 
   const handleSave = async (e) => {
@@ -103,9 +129,8 @@ function ProfileForm({ mode, initialProfile = null }) {
       const pwd = mode === 'create' ? passwordInput : passwordInput || prompt('Enter password to save changes:');
       if (!pwd) { setLoading(false); return; }
       await saveProfile(profileObj, pwd);
-      // Clear draft after successful save
-      try { sessionStorage.removeItem(DRAFT_KEY); } catch (e) {}
-      console.log('[ProfileForm] Profile saved successfully, draft cleared');
+      await clearDraft();
+      console.log('[ProfileForm] Profile saved, draft cleared');
       setProfile(profileObj);
       setPassword(pwd);
       setIsUnlocked(true);
@@ -120,8 +145,8 @@ function ProfileForm({ mode, initialProfile = null }) {
 
   const handleCancel = () => {
     if (mode === 'create') {
-      if (confirm('Discard profile and exit? Your draft will be lost.')) {
-        try { sessionStorage.removeItem(DRAFT_KEY); } catch (e) {}
+      if (confirm('Discard profile and exit? Draft will be deleted.')) {
+        clearDraft();
         window.close();
       }
     } else {
@@ -136,94 +161,55 @@ function ProfileForm({ mode, initialProfile = null }) {
         {mode === 'create' ? 'Fill in your information to get started' : 'Update your profile information'}
       </p>
 
+      {draftLoaded && (
+        <div className="alert alert-info mb-8" style={{fontSize:'12px',padding:'6px 10px',background:'var(--color-primary-highlight)',color:'var(--color-primary)'}}>
+          ✦ Unsaved draft restored — your previous data is back
+        </div>
+      )}
+
       {draftSaved && (
-        <div className="alert alert-success mb-8" style={{fontSize:'12px', padding:'6px 10px'}}>
-          ✓ Draft saved — your data is safe if popup closes
+        <div className="alert alert-success mb-8" style={{fontSize:'12px',padding:'6px 10px'}}>
+          ✓ Draft auto-saved — safe to close popup
         </div>
       )}
 
       {errors.general && <div className="alert alert-error mb-16">{errors.general}</div>}
 
       <form onSubmit={handleSave}>
+        {/* Personal */}
         <div className="form-section">
           <h3 className="form-section-title">👤 Personal Information</h3>
-          <div className="input-group">
-            <label htmlFor="firstName" className="input-label">First Name</label>
-            <input type="text" id="firstName" className="input-field" value={formData.personal.firstName} onChange={(e) => handleChange('personal', 'firstName', e.target.value)} placeholder="John" />
-          </div>
-          <div className="input-group">
-            <label htmlFor="lastName" className="input-label">Last Name</label>
-            <input type="text" id="lastName" className="input-field" value={formData.personal.lastName} onChange={(e) => handleChange('personal', 'lastName', e.target.value)} placeholder="Doe" />
-          </div>
+          <div className="input-group"><label htmlFor="firstName" className="input-label">First Name</label><input type="text" id="firstName" className="input-field" value={formData.personal.firstName} onChange={(e) => handleChange('personal', 'firstName', e.target.value)} placeholder="John" /></div>
+          <div className="input-group"><label htmlFor="lastName" className="input-label">Last Name</label><input type="text" id="lastName" className="input-field" value={formData.personal.lastName} onChange={(e) => handleChange('personal', 'lastName', e.target.value)} placeholder="Doe" /></div>
           <div className="input-group">
             <label htmlFor="email" className="input-label required">Email</label>
             <input type="email" id="email" className="input-field" value={formData.personal.email} onChange={(e) => handleChange('personal', 'email', e.target.value)} placeholder="john.doe@example.com" />
             {errors.email && <div className="input-error">{errors.email}</div>}
           </div>
-          <div className="input-group">
-            <label htmlFor="phone" className="input-label">Phone</label>
-            <input type="tel" id="phone" className="input-field" value={formData.personal.phone} onChange={(e) => handleChange('personal', 'phone', e.target.value)} placeholder="+1 234-567-8900" />
-          </div>
-          <div className="input-group">
-            <label htmlFor="address" className="input-label">Address</label>
-            <input type="text" id="address" className="input-field" value={formData.personal.address} onChange={(e) => handleChange('personal', 'address', e.target.value)} placeholder="123 Main Street" />
-          </div>
-          <div className="input-group">
-            <label htmlFor="city" className="input-label">City</label>
-            <input type="text" id="city" className="input-field" value={formData.personal.city} onChange={(e) => handleChange('personal', 'city', e.target.value)} placeholder="New York" />
-          </div>
-          <div className="input-group">
-            <label htmlFor="state" className="input-label">State / Province</label>
-            <input type="text" id="state" className="input-field" value={formData.personal.state} onChange={(e) => handleChange('personal', 'state', e.target.value)} placeholder="NY" />
-          </div>
-          <div className="input-group">
-            <label htmlFor="zipCode" className="input-label">ZIP / Postal Code</label>
-            <input type="text" id="zipCode" className="input-field" value={formData.personal.zipCode} onChange={(e) => handleChange('personal', 'zipCode', e.target.value)} placeholder="10001" />
-          </div>
-          <div className="input-group">
-            <label htmlFor="country" className="input-label">Country</label>
-            <input type="text" id="country" className="input-field" value={formData.personal.country} onChange={(e) => handleChange('personal', 'country', e.target.value)} placeholder="United States" />
-          </div>
+          <div className="input-group"><label htmlFor="phone" className="input-label">Phone</label><input type="tel" id="phone" className="input-field" value={formData.personal.phone} onChange={(e) => handleChange('personal', 'phone', e.target.value)} placeholder="+1 234-567-8900" /></div>
+          <div className="input-group"><label htmlFor="address" className="input-label">Address</label><input type="text" id="address" className="input-field" value={formData.personal.address} onChange={(e) => handleChange('personal', 'address', e.target.value)} placeholder="123 Main Street" /></div>
+          <div className="input-group"><label htmlFor="city" className="input-label">City</label><input type="text" id="city" className="input-field" value={formData.personal.city} onChange={(e) => handleChange('personal', 'city', e.target.value)} placeholder="New York" /></div>
+          <div className="input-group"><label htmlFor="state" className="input-label">State / Province</label><input type="text" id="state" className="input-field" value={formData.personal.state} onChange={(e) => handleChange('personal', 'state', e.target.value)} placeholder="NY" /></div>
+          <div className="input-group"><label htmlFor="zipCode" className="input-label">ZIP / Postal Code</label><input type="text" id="zipCode" className="input-field" value={formData.personal.zipCode} onChange={(e) => handleChange('personal', 'zipCode', e.target.value)} placeholder="10001" /></div>
+          <div className="input-group"><label htmlFor="country" className="input-label">Country</label><input type="text" id="country" className="input-field" value={formData.personal.country} onChange={(e) => handleChange('personal', 'country', e.target.value)} placeholder="United States" /></div>
         </div>
 
+        {/* Education */}
         <div className="form-section">
           <h3 className="form-section-title">🎓 Education</h3>
-          <div className="input-group">
-            <label htmlFor="degree" className="input-label">Degree</label>
-            <input type="text" id="degree" className="input-field" value={formData.education.degree} onChange={(e) => handleChange('education', 'degree', e.target.value)} placeholder="Bachelor of Science" />
-          </div>
-          <div className="input-group">
-            <label htmlFor="major" className="input-label">Major / Field of Study</label>
-            <input type="text" id="major" className="input-field" value={formData.education.major} onChange={(e) => handleChange('education', 'major', e.target.value)} placeholder="Computer Science" />
-          </div>
-          <div className="input-group">
-            <label htmlFor="university" className="input-label">University / College</label>
-            <input type="text" id="university" className="input-field" value={formData.education.university} onChange={(e) => handleChange('education', 'university', e.target.value)} placeholder="MIT" />
-          </div>
-          <div className="input-group">
-            <label htmlFor="graduationYear" className="input-label">Graduation Year</label>
-            <input type="number" id="graduationYear" className="input-field" value={formData.education.graduationYear} onChange={(e) => handleChange('education', 'graduationYear', e.target.value)} placeholder="2024" min="1950" max="2050" />
-          </div>
-          <div className="input-group">
-            <label htmlFor="gpa" className="input-label">GPA</label>
-            <input type="text" id="gpa" className="input-field" value={formData.education.gpa} onChange={(e) => handleChange('education', 'gpa', e.target.value)} placeholder="3.8" />
-          </div>
+          <div className="input-group"><label htmlFor="degree" className="input-label">Degree</label><input type="text" id="degree" className="input-field" value={formData.education.degree} onChange={(e) => handleChange('education', 'degree', e.target.value)} placeholder="Bachelor of Science" /></div>
+          <div className="input-group"><label htmlFor="major" className="input-label">Major / Field of Study</label><input type="text" id="major" className="input-field" value={formData.education.major} onChange={(e) => handleChange('education', 'major', e.target.value)} placeholder="Computer Science" /></div>
+          <div className="input-group"><label htmlFor="university" className="input-label">University / College</label><input type="text" id="university" className="input-field" value={formData.education.university} onChange={(e) => handleChange('education', 'university', e.target.value)} placeholder="MIT" /></div>
+          <div className="input-group"><label htmlFor="graduationYear" className="input-label">Graduation Year</label><input type="number" id="graduationYear" className="input-field" value={formData.education.graduationYear} onChange={(e) => handleChange('education', 'graduationYear', e.target.value)} placeholder="2024" min="1950" max="2050" /></div>
+          <div className="input-group"><label htmlFor="gpa" className="input-label">GPA</label><input type="text" id="gpa" className="input-field" value={formData.education.gpa} onChange={(e) => handleChange('education', 'gpa', e.target.value)} placeholder="3.8" /></div>
         </div>
 
+        {/* Experience */}
         <div className="form-section">
           <h3 className="form-section-title">💼 Experience</h3>
-          <div className="input-group">
-            <label htmlFor="currentRole" className="input-label">Current Role / Job Title</label>
-            <input type="text" id="currentRole" className="input-field" value={formData.experience.currentRole} onChange={(e) => handleChange('experience', 'currentRole', e.target.value)} placeholder="Software Engineer" />
-          </div>
-          <div className="input-group">
-            <label htmlFor="currentCompany" className="input-label">Current Company</label>
-            <input type="text" id="currentCompany" className="input-field" value={formData.experience.currentCompany} onChange={(e) => handleChange('experience', 'currentCompany', e.target.value)} placeholder="Google" />
-          </div>
-          <div className="input-group">
-            <label htmlFor="yearsOfExperience" className="input-label">Years of Experience</label>
-            <input type="number" id="yearsOfExperience" className="input-field" value={formData.experience.yearsOfExperience} onChange={(e) => handleChange('experience', 'yearsOfExperience', e.target.value)} placeholder="5" min="0" max="50" />
-          </div>
+          <div className="input-group"><label htmlFor="currentRole" className="input-label">Current Role / Job Title</label><input type="text" id="currentRole" className="input-field" value={formData.experience.currentRole} onChange={(e) => handleChange('experience', 'currentRole', e.target.value)} placeholder="Software Engineer" /></div>
+          <div className="input-group"><label htmlFor="currentCompany" className="input-label">Current Company</label><input type="text" id="currentCompany" className="input-field" value={formData.experience.currentCompany} onChange={(e) => handleChange('experience', 'currentCompany', e.target.value)} placeholder="Google" /></div>
+          <div className="input-group"><label htmlFor="yearsOfExperience" className="input-label">Years of Experience</label><input type="number" id="yearsOfExperience" className="input-field" value={formData.experience.yearsOfExperience} onChange={(e) => handleChange('experience', 'yearsOfExperience', e.target.value)} placeholder="5" min="0" max="50" /></div>
           <div className="input-group">
             <label htmlFor="skills" className="input-label">Skills (comma-separated)</label>
             <textarea
@@ -236,49 +222,42 @@ function ProfileForm({ mode, initialProfile = null }) {
               }}
               placeholder="JavaScript, React, Node.js, Python"
             />
-            <div style={{fontSize:'11px', color:'var(--color-text-muted)', marginTop:'4px'}}>Separate skills with commas</div>
+            <div style={{fontSize:'11px',color:'var(--color-text-muted)',marginTop:'4px'}}>Separate each skill with a comma</div>
           </div>
         </div>
 
+        {/* Links */}
         <div className="form-section">
           <h3 className="form-section-title">🔗 Links</h3>
-          <div className="input-group">
-            <label htmlFor="linkedin" className="input-label">LinkedIn</label>
-            <input type="url" id="linkedin" className="input-field" value={formData.links.linkedin} onChange={(e) => handleChange('links', 'linkedin', e.target.value)} placeholder="https://linkedin.com/in/username" />
-            {errors.linkedin && <div className="input-error">{errors.linkedin}</div>}
-          </div>
-          <div className="input-group">
-            <label htmlFor="github" className="input-label">GitHub</label>
-            <input type="url" id="github" className="input-field" value={formData.links.github} onChange={(e) => handleChange('links', 'github', e.target.value)} placeholder="https://github.com/username" />
-            {errors.github && <div className="input-error">{errors.github}</div>}
-          </div>
-          <div className="input-group">
-            <label htmlFor="portfolio" className="input-label">Portfolio</label>
-            <input type="url" id="portfolio" className="input-field" value={formData.links.portfolio} onChange={(e) => handleChange('links', 'portfolio', e.target.value)} placeholder="https://portfolio.com" />
-            {errors.portfolio && <div className="input-error">{errors.portfolio}</div>}
-          </div>
-          <div className="input-group">
-            <label htmlFor="website" className="input-label">Website</label>
-            <input type="url" id="website" className="input-field" value={formData.links.website} onChange={(e) => handleChange('links', 'website', e.target.value)} placeholder="https://yourwebsite.com" />
-            {errors.website && <div className="input-error">{errors.website}</div>}
-          </div>
+          <div className="input-group"><label htmlFor="linkedin" className="input-label">LinkedIn</label><input type="url" id="linkedin" className="input-field" value={formData.links.linkedin} onChange={(e) => handleChange('links', 'linkedin', e.target.value)} placeholder="https://linkedin.com/in/username" />{errors.linkedin && <div className="input-error">{errors.linkedin}</div>}</div>
+          <div className="input-group"><label htmlFor="github" className="input-label">GitHub</label><input type="url" id="github" className="input-field" value={formData.links.github} onChange={(e) => handleChange('links', 'github', e.target.value)} placeholder="https://github.com/username" />{errors.github && <div className="input-error">{errors.github}</div>}</div>
+          <div className="input-group"><label htmlFor="portfolio" className="input-label">Portfolio</label><input type="url" id="portfolio" className="input-field" value={formData.links.portfolio} onChange={(e) => handleChange('links', 'portfolio', e.target.value)} placeholder="https://portfolio.com" />{errors.portfolio && <div className="input-error">{errors.portfolio}</div>}</div>
+          <div className="input-group"><label htmlFor="website" className="input-label">Website</label><input type="url" id="website" className="input-field" value={formData.links.website} onChange={(e) => handleChange('links', 'website', e.target.value)} placeholder="https://yourwebsite.com" />{errors.website && <div className="input-error">{errors.website}</div>}</div>
         </div>
 
+        {/* Documents */}
         <div className="form-section">
           <h3 className="form-section-title">📄 Documents</h3>
           <div className="input-group">
-            <label htmlFor="resume" className="input-label">Resume (PDF, DOC, DOCX - Max 2MB)</label>
-            <div style={{fontSize:'11px', color:'var(--color-warning)', marginBottom:'6px', padding:'6px 8px', background:'var(--color-warning-highlight)', borderRadius:'var(--radius-sm)'}}>
-              ⚠️ Resume upload opens a file dialog which may close this popup. Your draft is auto-saved — reopen the extension after uploading.
+            <label className="input-label">Resume (PDF, DOC, DOCX - Max 2MB)</label>
+            <div style={{fontSize:'12px',color:'var(--color-warning)',marginBottom:'8px',padding:'8px 10px',background:'var(--color-warning-highlight)',borderRadius:'var(--radius-sm)',lineHeight:'1.5'}}>
+              ⚠️ Uploading a file closes the popup (Chrome limitation).<br/>
+              Click below to open the <strong>full options page</strong> where resume upload works correctly.
             </div>
-            <div className="file-upload">
-              <input type="file" id="resume" className="file-upload-input" accept=".pdf,.doc,.docx" onChange={handleFileUpload} />
-              <label htmlFor="resume" className="file-upload-label">{resumeFileName || 'Click to upload resume'}</label>
-            </div>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{width:'100%'}}
+              onClick={handleResumeUploadClick}
+            >
+              📎 Upload Resume (opens options page)
+            </button>
+            {resumeFileName && <div style={{fontSize:'12px',marginTop:'6px',color:'var(--color-success)'}}>✓ {resumeFileName}</div>}
             {errors.resume && <div className="input-error">{errors.resume}</div>}
           </div>
         </div>
 
+        {/* Password (create mode only) */}
         {mode === 'create' && (
           <div className="form-section">
             <h3 className="form-section-title">🔐 Password</h3>

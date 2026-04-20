@@ -15,17 +15,10 @@ import { calculateConfidence } from './confidence.js';
 // PROFILE VALUE EXTRACTION
 // ============================================
 
-/**
- * Extract value from profile using dot notation path
- * @param {Object} profile - User profile
- * @param {string} profilePath - Dot notation path (e.g., 'profile.personal.firstName')
- * @returns {any} - Field value or null
- */
 export function getProfileFieldValue(profile, profilePath) {
   try {
     const keys = profilePath.split('.');
     let value = profile;
-    
     for (const key of keys) {
       if (value && typeof value === 'object' && key in value) {
         value = value[key];
@@ -33,7 +26,6 @@ export function getProfileFieldValue(profile, profilePath) {
         return null;
       }
     }
-    
     return value;
   } catch (error) {
     console.error('[Mapper] Error extracting profile value:', error.message);
@@ -45,57 +37,33 @@ export function getProfileFieldValue(profile, profilePath) {
 // TYPE VALIDATION
 // ============================================
 
-/**
- * Validate that form field type matches profile data type
- * @param {Object} formField - Form field metadata
- * @param {string} profilePath - Profile field path
- * @param {any} profileValue - Profile field value
- * @returns {boolean} - true if types match
- */
 export function validateFieldType(formField, profilePath, profileValue) {
   try {
-    // Skip validation if value is null/undefined
-    if (profileValue === null || profileValue === undefined) {
-      return false;
+    if (profileValue === null || profileValue === undefined) return false;
+
+    // Arrays (skills) — valid if non-empty
+    if (Array.isArray(profileValue)) {
+      const valid = profileValue.length > 0;
+      if (!valid) console.log(`[Mapper]     ❌ Array value is empty for path: ${profilePath}`);
+      return valid;
     }
-    
-    // Email validation
-    if (formField.type === 'email' && profilePath.includes('email')) {
+
+    if (formField.type === 'email' && profilePath.includes('email'))
       return typeof profileValue === 'string' && profileValue.includes('@');
-    }
-    
-    // Phone validation
-    if (formField.type === 'tel' && profilePath.includes('phone')) {
+    if (formField.type === 'tel' && profilePath.includes('phone'))
       return typeof profileValue === 'string';
-    }
-    
-    // Number validation
-    if (formField.type === 'number') {
+    if (formField.type === 'number')
       return !isNaN(profileValue);
-    }
-    
-    // URL validation
-    if (formField.type === 'url') {
-      return typeof profileValue === 'string' && 
+    if (formField.type === 'url')
+      return typeof profileValue === 'string' &&
              (profileValue.startsWith('http://') || profileValue.startsWith('https://'));
-    }
-    
-    // File validation
-    if (formField.type === 'file' && profilePath.includes('resume')) {
-      return true; // File handling deferred to Phase 7
-    }
-    
-    // Select/dropdown - validate value exists
-    if (formField.type === 'select' || formField.type === 'select-one') {
+    if (formField.type === 'file' && profilePath.includes('resume'))
+      return true;
+    if (formField.type === 'select' || formField.type === 'select-one')
       return typeof profileValue === 'string' && profileValue.length > 0;
-    }
-    
-    // Textarea
-    if (formField.type === 'textarea') {
+    if (formField.type === 'textarea')
       return typeof profileValue === 'string' || Array.isArray(profileValue);
-    }
-    
-    // Default: text fields accept anything
+
     return typeof profileValue === 'string' || typeof profileValue === 'number';
   } catch (error) {
     console.error('[Mapper] Error validating field type:', error.message);
@@ -107,12 +75,6 @@ export function validateFieldType(formField, profilePath, profileValue) {
 // FIELD MATCHING
 // ============================================
 
-/**
- * Find best profile match for a single form field
- * @param {Object} formField - Form field metadata from scanner
- * @param {Object} profile - User profile
- * @returns {Object|null} - Best match or null
- */
 export function matchField(formField, profile) {
   try {
     console.log('[Mapper] Matching field:', {
@@ -121,75 +83,71 @@ export function matchField(formField, profile) {
       placeholder: formField.placeholder,
       type: formField.type
     });
-    
+
     const allPaths = getAllProfilePaths();
     let bestMatch = null;
     let bestScore = 0;
-    
+
     for (const profilePath of allPaths) {
       const pattern = getPatternForPath(profilePath);
       if (!pattern) continue;
-      
-      // Check field type compatibility
-      if (pattern.fieldTypes && !pattern.fieldTypes.includes(formField.type)) {
-        continue;
-      }
-      
-      // Calculate confidence
+
+      if (pattern.fieldTypes && !pattern.fieldTypes.includes(formField.type)) continue;
+
       const negativeKeywords = getNegativeKeywords(profilePath);
       const confidenceResult = calculateConfidence(formField, pattern, negativeKeywords);
-      
-      // Apply pattern weight
       const finalScore = confidenceResult.score * pattern.weight;
-      
-      // matchedOn is a string (like 'label' or 'name'), not an array
       const matchedStr = confidenceResult.matchedOn || 'none';
+
       console.log(`[Mapper]   ${profilePath}: score=${finalScore.toFixed(3)}, matched=${matchedStr}`);
-      
+
       if (finalScore > bestScore) {
         const profileValue = getProfileFieldValue(profile, profilePath);
-        
-        // Validate type
+
+        // ── Empty / null guard ──────────────────────────────────────────────
+        if (profileValue === null || profileValue === undefined) {
+          console.log(`[Mapper]     ❌ Profile value is null/undefined for: ${profilePath}`);
+          continue;
+        }
+        if (!Array.isArray(profileValue) && profileValue === '') {
+          console.log(`[Mapper]     ❌ Profile value is empty string for: ${profilePath}`);
+          continue;
+        }
+        if (Array.isArray(profileValue) && profileValue.length === 0) {
+          console.log(`[Mapper]     ❌ Skills array is empty for: ${profilePath} — add skills to your profile`);
+          continue;
+        }
+        // ────────────────────────────────────────────────────────────────────
+
         if (!validateFieldType(formField, profilePath, profileValue)) {
-          console.log(`[Mapper]     ❌ Type validation failed`);
+          console.log(`[Mapper]     ❌ Type validation failed for: ${profilePath}`);
           continue;
         }
-        
-        // Skip if profile value is empty
-        if (profileValue === null || profileValue === undefined || profileValue === '') {
-          console.log(`[Mapper]     ❌ Profile value is empty`);
-          continue;
-        }
-        
-        // Special handling for arrays (skills)
-        let displayValue = profileValue;
-        if (Array.isArray(profileValue)) {
-          displayValue = profileValue.join(', ');
-        }
-        
-        console.log(`[Mapper]     ✅ BEST MATCH! value="${displayValue}"`);
-        
+
+        const displayValue = Array.isArray(profileValue)
+          ? profileValue.join(', ')
+          : profileValue;
+
+        console.log(`[Mapper]     ✅ BEST MATCH! path=${profilePath} value="${displayValue}"`);
+
         bestScore = finalScore;
         bestMatch = {
           formFieldId: formField.id,
           formFieldSelector: formField.selector,
           formFieldLabel: formField.label || formField.placeholder || formField.name,
           formFieldType: formField.type,
-          profilePath: profilePath,
+          profilePath,
           profileValue: displayValue,
           confidence: finalScore,
-          matchedOn: matchedStr, // Store as string
+          matchedOn: matchedStr,
           requiresReview: finalScore < 0.8
         };
       }
     }
-    
-    if (bestMatch) {
-      console.log(`[Mapper] ✅ Field matched:`, bestMatch);
-    } else {
-      console.log(`[Mapper] ❌ No match found for field`);
-    }
-    
+
+    if (bestMatch) console.log(`[Mapper] ✅ Field matched:`, bestMatch);
+    else console.log(`[Mapper] ❌ No match found for field: "${formField.label || formField.name}"`);
+
     return bestMatch;
   } catch (error) {
     console.error('[Mapper] Error matching field:', error.message);
@@ -201,58 +159,30 @@ export function matchField(formField, profile) {
 // COMPLETE MAPPING
 // ============================================
 
-/**
- * Map entire profile to form fields
- * @param {Object} profile - User profile
- * @param {Object} formData - Scanned form data (from Phase 4)
- * @returns {Object} - Complete mapping result
- */
 export function mapProfileToForm(profile, formData) {
   try {
     console.log('[Mapper] Starting mapping with profile:', profile);
     console.log('[Mapper] Form data:', formData);
-    
+
     const matches = [];
     const unmatchedFormFields = [];
     const usedProfilePaths = new Set();
-    
-    // Validate inputs
+
     if (!profile || !formData || !formData.forms) {
       console.error('[Mapper] Invalid input data');
-      return {
-        matches: [],
-        unmatchedFormFields: [],
-        unmatchedProfileFields: [],
-        overallConfidence: 0,
-        requiresReview: true,
-        url: formData?.url || '',
-        timestamp: new Date().toISOString(),
-        error: 'Invalid input data'
-      };
+      return { matches: [], unmatchedFormFields: [], unmatchedProfileFields: [], overallConfidence: 0, requiresReview: true, url: formData?.url || '', timestamp: new Date().toISOString(), error: 'Invalid input data' };
     }
-    
+
     console.log(`[Mapper] Processing ${formData.forms.length} form(s)`);
-    
-    // Process each form
+
     for (const form of formData.forms) {
-      // Skip forms with CAPTCHA
-      if (form.hasCaptcha) {
-        console.log('[Mapper] Skipping form with CAPTCHA:', form.id);
-        continue;
-      }
-      
-      // Skip Google Forms (cannot fill iframes)
-      if (form.type === 'google-forms') {
-        console.log('[Mapper] Skipping Google Forms iframe:', form.id);
-        continue;
-      }
-      
-      console.log(`[Mapper] Processing form with ${form.fields.length} field(s)`);
-      
-      // Match each field
+      if (form.hasCaptcha) { console.log('[Mapper] Skipping CAPTCHA form:', form.id); continue; }
+      if (form.type === 'google-forms') { console.log('[Mapper] Skipping Google Forms iframe:', form.id); continue; }
+
+      console.log(`[Mapper] Processing form "${form.id}" with ${form.fields.length} field(s)`);
+
       for (const formField of form.fields) {
         const match = matchField(formField, profile);
-        
         if (match && match.confidence >= 0.6) {
           matches.push(match);
           usedProfilePaths.add(match.profilePath);
@@ -266,31 +196,25 @@ export function mapProfileToForm(profile, formData) {
         }
       }
     }
-    
-    console.log(`[Mapper] Found ${matches.length} match(es), ${unmatchedFormFields.length} unmatched field(s)`);
-    
-    // Find unused profile fields (have values but not matched)
+
+    console.log(`[Mapper] ${matches.length} match(es), ${unmatchedFormFields.length} unmatched`);
+
     const allProfilePaths = getAllProfilePaths();
     const unmatchedProfileFields = [];
-    
     for (const path of allProfilePaths) {
       if (!usedProfilePaths.has(path)) {
         const value = getProfileFieldValue(profile, path);
-        if (value !== null && value !== undefined && value !== '' && 
+        if (value !== null && value !== undefined && value !== '' &&
             (!Array.isArray(value) || value.length > 0)) {
-          unmatchedProfileFields.push({
-            path: path,
-            value: Array.isArray(value) ? value.join(', ') : value
-          });
+          unmatchedProfileFields.push({ path, value: Array.isArray(value) ? value.join(', ') : value });
         }
       }
     }
-    
-    // Calculate overall confidence
+
     const overallConfidence = matches.length > 0
       ? matches.reduce((sum, m) => sum + m.confidence, 0) / matches.length
       : 0;
-    
+
     const result = {
       matches,
       unmatchedFormFields,
@@ -300,21 +224,11 @@ export function mapProfileToForm(profile, formData) {
       url: formData.url,
       timestamp: new Date().toISOString()
     };
-    
+
     console.log('[Mapper] Mapping complete:', result);
-    
     return result;
   } catch (error) {
     console.error('[Mapper] Error mapping profile to form:', error.message);
-    return {
-      matches: [],
-      unmatchedFormFields: [],
-      unmatchedProfileFields: [],
-      overallConfidence: 0,
-      requiresReview: true,
-      url: formData?.url || '',
-      timestamp: new Date().toISOString(),
-      error: error.message
-    };
+    return { matches: [], unmatchedFormFields: [], unmatchedProfileFields: [], overallConfidence: 0, requiresReview: true, url: formData?.url || '', timestamp: new Date().toISOString(), error: error.message };
   }
 }
