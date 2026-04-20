@@ -8,311 +8,200 @@
 // HELPER FUNCTIONS
 // ============================================
 
-/**
- * Find form field element using multiple selector strategies
- * @param {Object} match - Match object with selector info
- * @returns {HTMLElement|null}
- */
 function findElement(match) {
-  // Strategy 1: Use provided CSS selector
+  console.log(`[Executor] findElement → label="${match.formFieldLabel}" selector="${match.formFieldSelector}" id="${match.formFieldId}"`);
+
   if (match.formFieldSelector) {
     try {
-      const element = document.querySelector(match.formFieldSelector);
-      if (element) return element;
-    } catch (error) {
-      console.warn('[Executor] Invalid selector:', match.formFieldSelector);
-    }
+      const el = document.querySelector(match.formFieldSelector);
+      if (el) { console.log(`  ✔ Found via CSS selector: ${match.formFieldSelector}`); return el; }
+      else { console.warn(`  ✘ CSS selector found nothing: ${match.formFieldSelector}`); }
+    } catch (e) { console.warn(`  ✘ Invalid CSS selector: ${match.formFieldSelector}`, e.message); }
   }
-  
-  // Strategy 2: Try ID selector
+
   if (match.formFieldId) {
-    const element = document.getElementById(match.formFieldId);
-    if (element) return element;
+    const el = document.getElementById(match.formFieldId);
+    if (el) { console.log(`  ✔ Found via getElementById: #${match.formFieldId}`); return el; }
+    else { console.warn(`  ✘ getElementById found nothing: #${match.formFieldId}`); }
   }
-  
-  // Strategy 3: Try name attribute
+
   if (match.formFieldId) {
     try {
-      const element = document.querySelector(`[name="${match.formFieldId}"]`);
-      if (element) return element;
-    } catch (error) {
-      // Invalid name attribute, skip
-    }
+      const el = document.querySelector(`[name="${match.formFieldId}"]`);
+      if (el) { console.log(`  ✔ Found via [name] attribute: ${match.formFieldId}`); return el; }
+      else { console.warn(`  ✘ [name] selector found nothing: ${match.formFieldId}`); }
+    } catch (e) {}
   }
-  
+
+  console.error(`  ✘ Element NOT FOUND for field: "${match.formFieldLabel}"`);
   return null;
 }
 
-/**
- * Check if element is fillable
- * @param {HTMLElement} element
- * @returns {Object} { fillable: boolean, reason: string }
- */
 function isElementFillable(element) {
-  if (!element) {
-    return { fillable: false, reason: 'Element not found' };
-  }
-  
-  // Check if disabled
-  if (element.disabled) {
-    return { fillable: false, reason: 'Element is disabled' };
-  }
-  
-  // Check if readonly
-  if (element.readOnly) {
-    return { fillable: false, reason: 'Element is read-only' };
-  }
-  
-  // Check visibility - offsetWidth/offsetHeight
-  if (element.offsetWidth === 0 || element.offsetHeight === 0) {
-    return { fillable: false, reason: 'Element is hidden' };
-  }
-  
-  // Check computed style
+  if (!element) return { fillable: false, reason: 'Element not found' };
+  if (element.disabled) { console.warn(`  ⚠ Element disabled: ${element.id || element.name}`); return { fillable: false, reason: 'Element is disabled' }; }
+  if (element.readOnly) { console.warn(`  ⚠ Element readOnly: ${element.id || element.name}`); return { fillable: false, reason: 'Element is read-only' }; }
+  if (element.offsetWidth === 0 || element.offsetHeight === 0) { console.warn(`  ⚠ Element hidden (zero size): ${element.id || element.name}`); return { fillable: false, reason: 'Element is hidden' }; }
+
   try {
     const style = window.getComputedStyle(element);
     if (style.display === 'none' || style.visibility === 'hidden') {
+      console.warn(`  ⚠ Element hidden (CSS): ${element.id || element.name} display=${style.display} visibility=${style.visibility}`);
       return { fillable: false, reason: 'Element is hidden (CSS)' };
     }
-  } catch (error) {
-    // Style check failed, but element might still be fillable
-  }
-  
-  // Check if file input (not supported due to security)
+  } catch (e) {}
+
   if (element.type === 'file') {
-    return { fillable: false, reason: 'File input not supported' };
+    console.warn(`  ⚠ File input detected — skipping autofill (browser security restriction). Upload manually.`);
+    return { fillable: false, reason: 'File input — upload manually in the form' };
   }
-  
+
   return { fillable: true, reason: null };
 }
 
-/**
- * Set element value with type-specific handling
- * @param {HTMLElement} element
- * @param {any} value
- * @param {string} fieldType
- * @returns {boolean} success
- */
 function setValue(element, value, fieldType) {
   try {
-    // Handle empty values
     if (value === null || value === undefined || value === '') {
+      console.warn(`  ⚠ setValue called with empty value for element: ${element.id || element.name}`);
       return false;
     }
-    
-    // Convert arrays to strings (for skills)
+
     if (Array.isArray(value)) {
+      console.log(`  ℹ Value is array [${value.join(', ')}] — joining with ", "`);
       value = value.join(', ');
     }
-    
-    // Convert to string
+
     const stringValue = String(value);
-    
-    // Type-specific setting
     const tagName = element.tagName.toLowerCase();
-    
+    console.log(`  ℹ setValue → tag=${tagName} type=${element.type} targetValue="${stringValue}"`);
+
     if (tagName === 'select') {
-      // Handle select elements
       const options = Array.from(element.options);
-      const matchingOption = options.find(opt => 
-        opt.value === stringValue || 
+      const match = options.find(opt =>
+        opt.value === stringValue ||
         opt.text === stringValue ||
         opt.value.toLowerCase() === stringValue.toLowerCase() ||
         opt.text.toLowerCase() === stringValue.toLowerCase()
       );
-      
-      if (matchingOption) {
-        element.value = matchingOption.value;
+      if (match) {
+        element.value = match.value;
+        console.log(`  ✔ Select option matched: "${match.text}" (value="${match.value}")`);
         return true;
       } else {
-        // No matching option found
+        console.warn(`  ✘ No matching <option> for value "${stringValue}". Available options: [${options.map(o => o.value).join(', ')}]`);
         return false;
       }
-    } else if (tagName === 'input' || tagName === 'textarea') {
-      // Handle input and textarea
-      element.value = stringValue;
-      
-      // Verify value was set
-      if (element.value !== stringValue) {
+    }
+
+    if (tagName === 'input' || tagName === 'textarea') {
+      // Try native setter first (works with React controlled inputs)
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+        tagName === 'textarea' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
+        'value'
+      );
+
+      if (nativeInputValueSetter && nativeInputValueSetter.set) {
+        nativeInputValueSetter.set.call(element, stringValue);
+        console.log(`  ℹ Native setter used for ${tagName}`);
+      } else {
+        element.value = stringValue;
+        console.log(`  ℹ Direct .value assignment used for ${tagName}`);
+      }
+
+      const afterValue = element.value;
+      if (afterValue !== stringValue) {
+        console.error(`  ✘ setValue MISMATCH on ${tagName}#${element.id || element.name}`);
+        console.error(`    Expected : "${stringValue}"`);
+        console.error(`    Got      : "${afterValue}"`);
+        console.error(`    Possible cause: React controlled input rejecting value, maxLength, or input type constraint`);
         return false;
       }
-      
-      return true;
-    } else {
-      // Unknown element type
-      element.value = stringValue;
+
+      console.log(`  ✔ Value confirmed set: "${afterValue}"`);
       return true;
     }
-    
+
+    element.value = stringValue;
+    return true;
+
   } catch (error) {
-    console.error('[Executor] setValue error:', error);
+    console.error('[Executor] setValue threw an error:', error);
     return false;
   }
 }
 
-/**
- * Trigger all necessary events on element
- * @param {HTMLElement} element
- */
 function triggerEvents(element) {
   try {
-    // Focus event (some forms need this first)
-    const focusEvent = new Event('focus', { 
-      bubbles: true, 
-      cancelable: true 
+    console.log(`  ℹ Triggering events on ${element.tagName.toLowerCase()}#${element.id || element.name || '(no id)'}`);
+    ['focus', 'input', 'change', 'blur'].forEach(eventName => {
+      const event = new Event(eventName, { bubbles: true, cancelable: true });
+      element.dispatchEvent(event);
     });
-    element.dispatchEvent(focusEvent);
-    
-    // Input event (for live validation)
-    const inputEvent = new Event('input', { 
-      bubbles: true, 
-      cancelable: true 
-    });
-    element.dispatchEvent(inputEvent);
-    
-    // Change event (for form state)
-    const changeEvent = new Event('change', { 
-      bubbles: true, 
-      cancelable: true 
-    });
-    element.dispatchEvent(changeEvent);
-    
-    // Blur event (for on-exit validation)
-    const blurEvent = new Event('blur', { 
-      bubbles: true, 
-      cancelable: true 
-    });
-    element.dispatchEvent(blurEvent);
-    
+    // Also fire React-style synthetic event
+    const reactInputEvent = new InputEvent('input', { bubbles: true, cancelable: true, data: element.value });
+    element.dispatchEvent(reactInputEvent);
+    console.log(`  ✔ Events fired: focus, input, change, blur + synthetic InputEvent`);
   } catch (error) {
     console.error('[Executor] Event trigger error:', error);
   }
 }
 
-/**
- * Fill a single form field
- * @param {Object} match - Match object
- * @returns {Object} { success: boolean, reason: string, skipped: boolean }
- */
 function fillSingleField(match) {
-  // Find element
+  console.log(`\n[Executor] ── Field: "${match.formFieldLabel}" ──`);
+  console.log(`  profileValue : ${JSON.stringify(match.profileValue)}`);
+  console.log(`  formFieldType: ${match.formFieldType}`);
+
   const element = findElement(match);
-  
-  if (!element) {
-    return { 
-      success: false, 
-      reason: 'Element not found',
-      label: match.formFieldLabel,
-      skipped: false
-    };
-  }
-  
-  // Check if fillable
+  if (!element) return { success: false, reason: 'Element not found', label: match.formFieldLabel, skipped: false };
+
   const { fillable, reason } = isElementFillable(element);
-  
-  if (!fillable) {
-    return { 
-      success: false, 
-      reason: reason,
-      label: match.formFieldLabel,
-      skipped: true // Mark as skipped, not failed
-    };
-  }
-  
-  // Set value
+  if (!fillable) return { success: false, reason, label: match.formFieldLabel, skipped: true };
+
   const valueSet = setValue(element, match.profileValue, match.formFieldType);
-  
-  if (!valueSet) {
-    return { 
-      success: false, 
-      reason: 'Failed to set value',
-      label: match.formFieldLabel,
-      skipped: false
-    };
-  }
-  
-  // Trigger events
+  if (!valueSet) return { success: false, reason: 'Failed to set value', label: match.formFieldLabel, skipped: false };
+
   triggerEvents(element);
-  
-  // Success
-  return { 
-    success: true, 
-    reason: null,
-    label: match.formFieldLabel,
-    skipped: false
-  };
+  return { success: true, reason: null, label: match.formFieldLabel, skipped: false };
 }
 
 // ============================================
 // MAIN EXECUTION FUNCTION
 // ============================================
 
-/**
- * Execute autofill for all matched fields
- * @param {Array} matches - Array of match objects
- * @returns {Object} Execution results
- */
 export function executeAutofill(matches) {
   const startTime = Date.now();
-  
-  console.log(`[Executor] Starting autofill for ${matches.length} fields`);
-  
-  // Validate input
+  console.log(`\n[Executor] ════════ Starting autofill for ${matches.length} fields ════════`);
+
   if (!Array.isArray(matches) || matches.length === 0) {
-    console.error('[Executor] Invalid matches array');
-    return {
-      success: false,
-      successCount: 0,
-      totalFields: 0,
-      failedFields: [],
-      skippedFields: [],
-      executionTime: 0,
-      error: 'Invalid matches array'
-    };
+    console.error('[Executor] Invalid or empty matches array');
+    return { success: false, successCount: 0, totalFields: 0, failedFields: [], skippedFields: [], executionTime: 0, error: 'Invalid matches array' };
   }
-  
-  // Results tracking
-  const results = {
-    successCount: 0,
-    failedFields: [],
-    skippedFields: []
-  };
-  
-  // Process each match
+
+  const results = { successCount: 0, failedFields: [], skippedFields: [] };
+
   matches.forEach((match, index) => {
-    console.log(`[Executor] Processing field ${index + 1}/${matches.length}: ${match.formFieldLabel}`);
-    
+    console.log(`\n[Executor] Processing field ${index + 1}/${matches.length}: ${match.formFieldLabel}`);
     const result = fillSingleField(match);
-    
+
     if (result.success) {
       results.successCount++;
       console.log(`  ✅ Filled: ${match.formFieldLabel}`);
     } else if (result.skipped) {
-      results.skippedFields.push({
-        label: result.label,
-        reason: result.reason,
-        selector: match.formFieldSelector
-      });
-      console.log(`  ⏭️ Skipped: ${match.formFieldLabel} (${result.reason})`);
+      results.skippedFields.push({ label: result.label, reason: result.reason, selector: match.formFieldSelector });
+      console.log(`  ⏭️ Skipped: ${match.formFieldLabel} — ${result.reason}`);
     } else {
-      results.failedFields.push({
-        label: result.label,
-        reason: result.reason,
-        selector: match.formFieldSelector
-      });
-      console.log(`  ❌ Failed: ${match.formFieldLabel} (${result.reason})`);
+      results.failedFields.push({ label: result.label, reason: result.reason, selector: match.formFieldSelector });
+      console.log(`  ❌ Failed: ${match.formFieldLabel} — ${result.reason}`);
     }
   });
-  
+
   const executionTime = Date.now() - startTime;
-  
-  // Summary
-  console.log(`[Executor] Autofill complete:`);
-  console.log(`  Success: ${results.successCount}/${matches.length}`);
-  console.log(`  Failed: ${results.failedFields.length}`);
-  console.log(`  Skipped: ${results.skippedFields.length}`);
-  console.log(`  Time: ${executionTime}ms`);
-  
+  console.log(`\n[Executor] ════════ Autofill complete ════════`);
+  console.log(`  ✅ Success : ${results.successCount}/${matches.length}`);
+  console.log(`  ❌ Failed  : ${results.failedFields.length}`, results.failedFields.length ? results.failedFields : '');
+  console.log(`  ⏭️ Skipped : ${results.skippedFields.length}`, results.skippedFields.length ? results.skippedFields : '');
+  console.log(`  ⏱ Time    : ${executionTime}ms`);
+
   return {
     success: results.successCount > 0,
     successCount: results.successCount,
