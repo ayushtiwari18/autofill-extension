@@ -6,7 +6,8 @@
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "tabs"
   ],
   "action": {
     "default_popup": "public/index.html",
@@ -15,6 +16,10 @@
       "48": "public/icon48.png",
       "128": "public/icon128.png"
     }
+  },
+  "options_ui": {
+    "page": "public/index.html",
+    "open_in_tab": true
   },
   "background": {
     "service_worker": "background.js"
