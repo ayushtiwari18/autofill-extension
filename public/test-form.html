@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Autofill Extension Test Form</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #d1d5db;
+      --primary: #2563eb;
+      --success: #16a34a;
+      --warning: #d97706;
+      --danger: #dc2626;
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+      --radius: 12px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 20px 80px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #eff6ff, #ffffff);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero h1 {
+      margin: 0 0 12px;
+      font-size: 32px;
+    }
+
+    .hero p {
+      margin: 8px 0;
+      color: var(--muted);
+    }
+
+    .note-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .note {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 24px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .card h2 {
+      margin-top: 0;
+      margin-bottom: 8px;
+      font-size: 24px;
+    }
+
+    .card p {
+      margin-top: 0;
+      color: var(--muted);
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .field,
+    .field-full {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field-full {
+      grid-column: 1 / -1;
+    }
+
+    label,
+    .group-label {
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 14px;
+      background: #fff;
+    }
+
+    textarea {
+      min-height: 110px;
+      resize: vertical;
+    }
+
+    fieldset {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      margin: 0;
+    }
+
+    legend {
+      padding: 0 8px;
+      font-weight: bold;
+      font-size: 14px;
+    }
+
+    .inline-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 8px;
+    }
+
+    .inline-options label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: normal;
+    }
+
+    .inline-options input {
+      width: auto;
+      margin: 0;
+      padding: 0;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .primary { background: var(--primary); color: white; }
+    .secondary { background: #e5e7eb; color: var(--text); }
+    .success { background: var(--success); color: white; }
+    .warning { background: var(--warning); color: white; }
+
+    .test-panel {
+      position: sticky;
+      top: 20px;
+    }
+
+    .status-list {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: bold;
+      margin-right: 6px;
+      margin-bottom: 6px;
+      border: 1px solid var(--border);
+      background: #f9fafb;
+    }
+
+    .hidden-section {
+      display: none;
+    }
+
+    .debug-box {
+      background: #111827;
+      color: #e5e7eb;
+      border-radius: 10px;
+      padding: 14px;
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      min-height: 120px;
+    }
+
+    .danger-text {
+      color: var(--danger);
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    @media (max-width: 900px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .test-panel {
+        position: static;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero h1 {
+        font-size: 26px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <h1>Job Application Autofill Test Form</h1>
+      <p>This page is for testing scanner, mapper, and executor behavior safely before trying real job portals.</p>
+      <p>Open DevTools Console, run the extension, and verify exactly which fields are detected, matched, skipped, or failed.</p>
+
+      <div class="note-grid">
+        <div class="note"><strong>Test Goal 1</strong><br />Basic field detection and filling.</div>
+        <div class="note"><strong>Test Goal 2</strong><br />Multiple forms on same page.</div>
+        <div class="note"><strong>Test Goal 3</strong><br />Hidden, disabled, readonly, and file input handling.</div>
+        <div class="note"><strong>Test Goal 4</strong><br />Dynamic fields added after page load.</div>
+      </div>
+    </section>
+
+    <div class="layout">
+      <main>
+        <section class="card">
+          <h2>Primary Application Form</h2>
+          <p>This form includes most common job application fields.</p>
+
+          <form id="jobApplicationForm" action="#" method="post">
+            <div class="form-grid">
+              <div class="field">
+                <label for="firstName">First Name</label>
+                <input type="text" id="firstName" name="firstName" placeholder="Enter first name" required />
+              </div>
+
+              <div class="field">
+                <label for="lastName">Last Name</label>
+                <input type="text" id="lastName" name="lastName" placeholder="Enter last name" required />
+              </div>
+
+              <div class="field">
+                <label for="fullName">Full Name</label>
+                <input type="text" id="fullName" name="fullName" placeholder="Enter full name" />
+              </div>
+
+              <div class="field">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" placeholder="Enter email" required />
+              </div>
+
+              <div class="field">
+                <label for="phone">Phone Number</label>
+                <input type="tel" id="phone" name="phone" placeholder="Enter phone number" />
+              </div>
+
+              <div class="field">
+                <label for="linkedinUrl">LinkedIn URL</label>
+                <input type="url" id="linkedinUrl" name="linkedinUrl" placeholder="https://linkedin.com/in/your-profile" />
+              </div>
+
+              <div class="field">
+                <label for="portfolioUrl">Portfolio URL</label>
+                <input type="url" id="portfolioUrl" name="portfolioUrl" placeholder="https://yourportfolio.com" />
+              </div>
+
+              <div class="field">
+                <label for="githubUrl">GitHub URL</label>
+                <input type="url" id="githubUrl" name="githubUrl" placeholder="https://github.com/username" />
+              </div>
+
+              <div class="field">
+                <label for="currentCompany">Current Company</label>
+                <input type="text" id="currentCompany" name="currentCompany" placeholder="Current company" />
+              </div>
+
+              <div class="field">
+                <label for="currentTitle">Current Job Title</label>
+                <input type="text" id="currentTitle" name="currentTitle" placeholder="Current title" />
+              </div>
+
+              <div class="field">
+                <label for="experienceYears">Years of Experience</label>
+                <input type="number" id="experienceYears" name="experienceYears" min="0" max="50" placeholder="5" />
+              </div>
+
+              <div class="field">
+                <label for="expectedSalary">Expected Salary</label>
+                <input type="number" id="expectedSalary" name="expectedSalary" min="0" step="1000" placeholder="100000" />
+              </div>
+
+              <div class="field">
+                <label for="noticePeriod">Notice Period (Days)</label>
+                <input type="number" id="noticePeriod" name="noticePeriod" min="0" max="365" placeholder="30" />
+              </div>
+
+              <div class="field">
+                <label for="availableDate">Available Start Date</label>
+                <input type="date" id="availableDate" name="availableDate" />
+              </div>
+
+              <div class="field">
+                <label for="location">Current Location</label>
+                <input type="text" id="location" name="location" placeholder="Mumbai, Maharashtra" />
+              </div>
+
+              <div class="field">
+                <label for="country">Country</label>
+                <select id="country" name="country">
+                  <option value="">Select country</option>
+                  <option value="India">India</option>
+                  <option value="United States">United States</option>
+                  <option value="Canada">Canada</option>
+                  <option value="Germany">Germany</option>
+                </select>
+              </div>
+
+              <div class="field">
+                <label for="employmentType">Employment Type</label>
+                <select id="employmentType" name="employmentType">
+                  <option value="">Select employment type</option>
+                  <option value="Full-time">Full-time</option>
+                  <option value="Part-time">Part-time</option>
+                  <option value="Contract">Contract</option>
+                  <option value="Internship">Internship</option>
+                </select>
+              </div>
+
+              <div class="field">
+                <label for="educationLevel">Highest Education</label>
+                <select id="educationLevel" name="educationLevel">
+                  <option value="">Select education</option>
+                  <option value="High School">High School</option>
+                  <option value="Bachelor's">Bachelor's</option>
+                  <option value="Master's">Master's</option>
+                  <option value="PhD">PhD</option>
+                </select>
+              </div>
+
+              <div class="field-full">
+                <label for="address">Address</label>
+                <textarea id="address" name="address" placeholder="Enter full address"></textarea>
+              </div>
+
+              <div class="field-full">
+                <label for="summary">Professional Summary</label>
+                <textarea id="summary" name="summary" placeholder="Write a short summary"></textarea>
+              </div>
+
+              <div class="field-full">
+                <label for="skills">Skills</label>
+                <textarea id="skills" name="skills" placeholder="JavaScript, React, Automation, Testing"></textarea>
+              </div>
+
+              <div class="field-full">
+                <label for="coverLetter">Cover Letter</label>
+                <textarea id="coverLetter" name="coverLetter" placeholder="Write your cover letter here"></textarea>
+              </div>
+
+              <div class="field-full">
+                <fieldset>
+                  <legend>Work Authorization</legend>
+                  <div class="inline-options">
+                    <label><input type="radio" name="workAuthorization" value="Yes" /> Yes</label>
+                    <label><input type="radio" name="workAuthorization" value="No" /> No</label>
+                  </div>
+                </fieldset>
+              </div>
+
+              <div class="field-full">
+                <fieldset>
+                  <legend>Job Preferences</legend>
+                  <div class="inline-options">
+                    <label><input type="checkbox" id="relocate" name="relocate" /> Willing to relocate</label>
+                    <label><input type="checkbox" id="remote" name="remote" /> Open to remote work</label>
+                    <label><input type="checkbox" id="nightShift" name="nightShift" /> Comfortable with night shift</label>
+                  </div>
+                </fieldset>
+              </div>
+
+              <div class="field-full">
+                <label for="resume">Resume Upload</label>
+                <input type="file" id="resume" name="resume" />
+                <div class="danger-text">Expected behavior: scanner may detect it, executor should skip file input.</div>
+              </div>
+
+              <div class="field">
+                <label for="readonlyField">Readonly Reference ID</label>
+                <input type="text" id="readonlyField" name="readonlyField" value="READ-ONLY-ID-001" readonly />
+              </div>
+
+              <div class="field">
+                <label for="disabledField">Disabled Internal Status</label>
+                <input type="text" id="disabledField" name="disabledField" value="System locked" disabled />
+              </div>
+
+              <div class="field-full hidden-section">
+                <label for="hiddenSecretField">Hidden Internal Token</label>
+                <input type="text" id="hiddenSecretField" name="hiddenSecretField" value="SHOULD_NOT_BE_FILLED" />
+              </div>
+            </div>
+
+            <div class="actions">
+              <button type="button" class="secondary" id="addDynamicFieldsBtn">Add Dynamic Fields</button>
+              <button type="reset" class="warning">Reset Form</button>
+              <button type="submit" class="primary">Submit Application</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>Secondary Quick Apply Form</h2>
+          <p>This helps test multiple forms on the same page.</p>
+
+          <form id="quickApplyForm" action="#" method="post">
+            <div class="form-grid">
+              <div class="field">
+                <label for="qaName">Candidate Name</label>
+                <input type="text" id="qaName" name="qaName" placeholder="Enter candidate name" />
+              </div>
+
+              <div class="field">
+                <label for="qaEmail">Candidate Email</label>
+                <input type="email" id="qaEmail" name="qaEmail" placeholder="Enter candidate email" />
+              </div>
+
+              <div class="field">
+                <label for="qaPhone">Candidate Phone</label>
+                <input type="tel" id="qaPhone" name="qaPhone" placeholder="Enter candidate phone" />
+              </div>
+
+              <div class="field">
+                <label for="qaLinkedin">Candidate LinkedIn</label>
+                <input type="url" id="qaLinkedin" name="qaLinkedin" placeholder="LinkedIn profile" />
+              </div>
+
+              <div class="field-full">
+                <label for="qaMessage">Short Note</label>
+                <textarea id="qaMessage" name="qaMessage" placeholder="Tell us why you are a good fit"></textarea>
+              </div>
+            </div>
+
+            <div class="actions">
+              <button type="submit" class="success">Send Quick Apply</button>
+            </div>
+          </form>
+        </section>
+      </main>
+
+      <aside class="test-panel">
+        <section class="card">
+          <h2>Testing Checklist</h2>
+          <p>Use this panel while checking console logs.</p>
+          <div>
+            <span class="pill">Text</span>
+            <span class="pill">Email</span>
+            <span class="pill">Phone</span>
+            <span class="pill">URL</span>
+            <span class="pill">Number</span>
+            <span class="pill">Date</span>
+            <span class="pill">Textarea</span>
+            <span class="pill">Select</span>
+            <span class="pill">Radio</span>
+            <span class="pill">Checkbox</span>
+            <span class="pill">File</span>
+            <span class="pill">Readonly</span>
+            <span class="pill">Disabled</span>
+            <span class="pill">Hidden</span>
+            <span class="pill">Dynamic</span>
+            <span class="pill">Multiple Forms</span>
+          </div>
+          <ul class="status-list">
+            <li>Verify scanner detects both forms.</li>
+            <li>Verify hidden fields are ignored.</li>
+            <li>Verify disabled and readonly fields are skipped safely.</li>
+            <li>Verify file input is never filled.</li>
+            <li>Verify dynamic fields are detected after clicking button.</li>
+          </ul>
+        </section>
+
+        <section class="card">
+          <h2>On-Page Debug Notes</h2>
+          <p>This page logs its own actions too, so you can compare page logs vs extension logs.</p>
+          <div id="debugOutput" class="debug-box">[Test Page] Ready\n</div>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const debugOutput = document.getElementById('debugOutput');
+
+    function pageLog(message) {
+      console.log('[Test Page]', message);
+      debugOutput.textContent += message + '\n';
+    }
+
+    document.getElementById('addDynamicFieldsBtn').addEventListener('click', function () {
+      pageLog('Adding dynamic fields to primary form');
+
+      const container = document.createElement('div');
+      container.className = 'form-grid';
+      container.id = 'dynamicFieldsContainer';
+      container.innerHTML = `
+        <div class="field">
+          <label for="dynamicPreferredName">Preferred Name</label>
+          <input type="text" id="dynamicPreferredName" name="dynamicPreferredName" placeholder="Preferred name" />
+        </div>
+        <div class="field">
+          <label for="dynamicTwitter">Twitter / X Profile</label>
+          <input type="url" id="dynamicTwitter" name="dynamicTwitter" placeholder="https://x.com/username" />
+        </div>
+        <div class="field-full">
+          <label for="dynamicWhyJoin">Why do you want to join us?</label>
+          <textarea id="dynamicWhyJoin" name="dynamicWhyJoin" placeholder="Explain why you want to join"></textarea>
+        </div>
+      `;
+
+      const form = document.getElementById('jobApplicationForm');
+      if (!document.getElementById('dynamicFieldsContainer')) {
+        form.insertBefore(container, form.querySelector('.actions'));
+        pageLog('Dynamic fields inserted successfully');
+      } else {
+        pageLog('Dynamic fields already exist, skipping duplicate insert');
+      }
+    });
+
+    document.getElementById('jobApplicationForm').addEventListener('submit', function (event) {
+      event.preventDefault();
+      pageLog('Primary form submit prevented intentionally for safe testing');
+      alert('Primary form submission blocked. This page is for safe autofill testing only.');
+    });
+
+    document.getElementById('quickApplyForm').addEventListener('submit', function (event) {
+      event.preventDefault();
+      pageLog('Quick apply form submit prevented intentionally for safe testing');
+      alert('Quick Apply submission blocked. This page is for safe autofill testing only.');
+    });
+
+    window.addEventListener('load', function () {
+      pageLog('Window loaded');
+      pageLog('Primary form fields ready');
+      pageLog('Open DevTools Console before running extension tests');
+    });
+  </script>
+</body>
+</html>
