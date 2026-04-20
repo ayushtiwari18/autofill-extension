@@ -50,6 +50,11 @@ function ProfileForm({ mode, initialProfile = null }) {
   const [draftSaved, setDraftSaved] = useState(false);
   const draftTimer = useRef(null);
 
+  // isFirstRender: skip saving on the very first mount render only.
+  // Completely independent of whether a draft exists — fixes the old
+  // broken guard (!draftLoaded && !initialProfile) that prevented ALL saves.
+  const isFirstRender = useRef(true);
+
   // On mount: restore draft from chrome.storage.local
   useEffect(() => {
     loadDraft().then(draft => {
@@ -57,13 +62,19 @@ function ProfileForm({ mode, initialProfile = null }) {
         setFormData(draft);
         setDraftLoaded(true);
         console.log('[ProfileForm] Restored draft — unsaved data recovered');
+      } else {
+        console.log('[ProfileForm] No draft found — starting fresh form');
       }
     });
   }, []);
 
-  // Auto-save draft on every formData change (debounced 800ms)
+  // Auto-save draft on every formData change (debounced 800ms).
+  // Skip only the very first render (initial mount) using isFirstRender ref.
   useEffect(() => {
-    if (!draftLoaded && !initialProfile) return; // skip initial render before draft load
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return; // skip initial mount — do not save empty default state
+    }
     clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => {
       saveDraft(formData).then(() => {
@@ -101,14 +112,13 @@ function ProfileForm({ mode, initialProfile = null }) {
     if (errors[field]) setErrors(prev => { const e = { ...prev }; delete e[field]; return e; });
   };
 
-  // Resume upload: open options page instead of file picker in popup
+  // Resume upload: open options page (full tab) so file picker works without closing popup
   const handleResumeUploadClick = () => {
     console.log('[ProfileForm] Resume upload requested — opening options page');
     if (chrome.runtime.openOptionsPage) {
       chrome.runtime.openOptionsPage();
     } else {
-      const optionsUrl = chrome.runtime.getURL('options.html');
-      chrome.tabs.create({ url: optionsUrl });
+      chrome.tabs.create({ url: chrome.runtime.getURL('public/index.html') });
     }
   };
 
@@ -126,7 +136,9 @@ function ProfileForm({ mode, initialProfile = null }) {
           updatedAt: new Date().toISOString()
         }
       };
-      const pwd = mode === 'create' ? passwordInput : passwordInput || prompt('Enter password to save changes:');
+      const pwd = mode === 'create'
+        ? passwordInput
+        : passwordInput || prompt('Enter your password to save changes:');
       if (!pwd) { setLoading(false); return; }
       await saveProfile(profileObj, pwd);
       await clearDraft();
@@ -241,7 +253,7 @@ function ProfileForm({ mode, initialProfile = null }) {
           <div className="input-group">
             <label className="input-label">Resume (PDF, DOC, DOCX - Max 2MB)</label>
             <div style={{fontSize:'12px',color:'var(--color-warning)',marginBottom:'8px',padding:'8px 10px',background:'var(--color-warning-highlight)',borderRadius:'var(--radius-sm)',lineHeight:'1.5'}}>
-              ⚠️ Uploading a file closes the popup (Chrome limitation).<br/>
+              ⚠️ File picker closes the popup (Chrome limitation).<br/>
               Click below to open the <strong>full options page</strong> where resume upload works correctly.
             </div>
             <button
