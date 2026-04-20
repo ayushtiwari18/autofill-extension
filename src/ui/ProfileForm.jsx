@@ -3,6 +3,7 @@ import { useAppContext } from './Popup.jsx';
 import { initializeProfile, saveProfile } from '../storage/profileStore.js';
 
 const DRAFT_KEY = 'autofill_profile_draft';
+const RESUME_KEY = 'autofill_resume';
 
 // ── chrome.storage.local draft helpers ──────────────────────────────────────
 async function saveDraft(data) {
@@ -38,6 +39,10 @@ async function clearDraft() {
 function ProfileForm({ mode, initialProfile = null }) {
   const { setProfile, setPassword, setIsUnlocked, setCurrentScreen } = useAppContext();
 
+  // Detect whether we are running in a full Chrome tab (options page)
+  // or in the 400px-wide popup. Popup is always <= 500px; tab is full width.
+  const isTabMode = window.outerWidth > 600;
+
   const [formData, setFormData] = useState(
     initialProfile?.profile || initializeProfile().profile
   );
@@ -47,33 +52,34 @@ function ProfileForm({ mode, initialProfile = null }) {
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [resumeFileName, setResumeFileName] = useState('');
+  const [resumeUploaded, setResumeUploaded] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
   const draftTimer = useRef(null);
-
-  // isFirstRender: skip saving on the very first mount render only.
-  // Completely independent of whether a draft exists — fixes the old
-  // broken guard (!draftLoaded && !initialProfile) that prevented ALL saves.
   const isFirstRender = useRef(true);
 
-  // On mount: restore draft from chrome.storage.local
+  // On mount: restore draft + check for already-saved resume
   useEffect(() => {
     loadDraft().then(draft => {
       if (draft) {
         setFormData(draft);
         setDraftLoaded(true);
         console.log('[ProfileForm] Restored draft — unsaved data recovered');
-      } else {
-        console.log('[ProfileForm] No draft found — starting fresh form');
       }
     });
+    // Show previously saved resume name if any
+    chrome.storage.local.get(RESUME_KEY).then(result => {
+      if (result[RESUME_KEY]?.name) {
+        setResumeFileName(result[RESUME_KEY].name);
+        setResumeUploaded(true);
+      }
+    }).catch(() => {});
   }, []);
 
-  // Auto-save draft on every formData change (debounced 800ms).
-  // Skip only the very first render (initial mount) using isFirstRender ref.
+  // Auto-save draft on every formData change (debounced 800ms)
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
-      return; // skip initial mount — do not save empty default state
+      return;
     }
     clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => {
@@ -112,7 +118,54 @@ function ProfileForm({ mode, initialProfile = null }) {
     if (errors[field]) setErrors(prev => { const e = { ...prev }; delete e[field]; return e; });
   };
 
-  // Resume upload: open options page (full tab) so file picker works without closing popup
+  // ── Resume upload (tab mode only) ────────────────────────────────────────
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Clear previous resume error
+    setErrors(prev => { const e = { ...prev }; delete e.resume; return e; });
+
+    // 2MB size limit
+    if (file.size > 2 * 1024 * 1024) {
+      setErrors(prev => ({ ...prev, resume: 'File too large. Maximum size is 2MB.' }));
+      return;
+    }
+
+    const allowed = ['application/pdf', 'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (!allowed.includes(file.type)) {
+      setErrors(prev => ({ ...prev, resume: 'Only PDF, DOC, or DOCX files are allowed.' }));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        await chrome.storage.local.set({
+          [RESUME_KEY]: {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            data: evt.target.result, // base64 data URL
+            savedAt: new Date().toISOString()
+          }
+        });
+        setResumeFileName(file.name);
+        setResumeUploaded(true);
+        console.log('[ProfileForm] Resume saved to chrome.storage.local:', file.name);
+      } catch (err) {
+        console.error('[ProfileForm] Resume save failed:', err);
+        setErrors(prev => ({ ...prev, resume: 'Failed to save resume. Try a smaller file.' }));
+      }
+    };
+    reader.onerror = () => {
+      setErrors(prev => ({ ...prev, resume: 'Failed to read file.' }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // ── Open options page tab (popup mode only) ───────────────────────────────
   const handleResumeUploadClick = () => {
     console.log('[ProfileForm] Resume upload requested — opening options page');
     if (chrome.runtime.openOptionsPage) {
@@ -172,6 +225,14 @@ function ProfileForm({ mode, initialProfile = null }) {
       <p className="welcome-subtitle mb-24">
         {mode === 'create' ? 'Fill in your information to get started' : 'Update your profile information'}
       </p>
+
+      {/* Tab mode banner */}
+      {isTabMode && (
+        <div className="alert alert-info mb-16" style={{fontSize:'13px',padding:'10px 14px',background:'var(--color-primary-highlight)',color:'var(--color-primary)',borderRadius:'var(--radius-md)'}}>
+          📂 You’re on the <strong>Options Page</strong> — you can upload your resume here.
+          After uploading, close this tab and reopen the extension popup to save your profile.
+        </div>
+      )}
 
       {draftLoaded && (
         <div className="alert alert-info mb-8" style={{fontSize:'12px',padding:'6px 10px',background:'var(--color-primary-highlight)',color:'var(--color-primary)'}}>
@@ -251,21 +312,55 @@ function ProfileForm({ mode, initialProfile = null }) {
         <div className="form-section">
           <h3 className="form-section-title">📄 Documents</h3>
           <div className="input-group">
-            <label className="input-label">Resume (PDF, DOC, DOCX - Max 2MB)</label>
-            <div style={{fontSize:'12px',color:'var(--color-warning)',marginBottom:'8px',padding:'8px 10px',background:'var(--color-warning-highlight)',borderRadius:'var(--radius-sm)',lineHeight:'1.5'}}>
-              ⚠️ File picker closes the popup (Chrome limitation).<br/>
-              Click below to open the <strong>full options page</strong> where resume upload works correctly.
-            </div>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{width:'100%'}}
-              onClick={handleResumeUploadClick}
-            >
-              📎 Upload Resume (opens options page)
-            </button>
-            {resumeFileName && <div style={{fontSize:'12px',marginTop:'6px',color:'var(--color-success)'}}>✓ {resumeFileName}</div>}
-            {errors.resume && <div className="input-error">{errors.resume}</div>}
+            <label className="input-label">Resume (PDF, DOC, DOCX — Max 2MB)</label>
+
+            {isTabMode ? (
+              // TAB MODE: real file picker
+              <div>
+                {resumeUploaded && (
+                  <div style={{fontSize:'13px',color:'var(--color-success)',marginBottom:'8px',padding:'8px 10px',background:'var(--color-success-highlight)',borderRadius:'var(--radius-sm)'}}>
+                    ✓ Resume saved: <strong>{resumeFileName}</strong>
+                    <div style={{fontSize:'11px',marginTop:'2px',color:'var(--color-text-muted)'}}>Close this tab and reopen the extension popup to save your profile.</div>
+                  </div>
+                )}
+                <label
+                  htmlFor="resumeFile"
+                  className="btn btn-secondary"
+                  style={{width:'100%',textAlign:'center',cursor:'pointer',display:'block'}}
+                >
+                  📂 {resumeUploaded ? 'Replace Resume' : 'Choose Resume File'}
+                </label>
+                <input
+                  type="file"
+                  id="resumeFile"
+                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={handleFileChange}
+                  style={{display:'none'}}
+                />
+                {errors.resume && <div className="input-error" style={{marginTop:'6px'}}>{errors.resume}</div>}
+              </div>
+            ) : (
+              // POPUP MODE: redirect to options page tab
+              <div>
+                <div style={{fontSize:'12px',color:'var(--color-warning)',marginBottom:'8px',padding:'8px 10px',background:'var(--color-warning-highlight)',borderRadius:'var(--radius-sm)',lineHeight:'1.5'}}>
+                  ⚠️ File picker closes the popup (Chrome limitation).<br/>
+                  Click below to open the <strong>options page</strong> where you can upload your resume.
+                </div>
+                {resumeUploaded && (
+                  <div style={{fontSize:'12px',color:'var(--color-success)',marginBottom:'8px'}}>
+                    ✓ Resume on file: <strong>{resumeFileName}</strong>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{width:'100%'}}
+                  onClick={handleResumeUploadClick}
+                >
+                  📎 {resumeUploaded ? 'Replace Resume (opens options page)' : 'Upload Resume (opens options page)'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
