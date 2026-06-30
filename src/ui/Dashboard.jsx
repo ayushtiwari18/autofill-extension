@@ -65,7 +65,6 @@ function Dashboard() {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab) return;
 
-      // Request last scanned data from background
       const response = await chrome.runtime.sendMessage({ action: 'GET_LAST_SCANNED_DATA' });
       if (response && response.formData && response.formData.url === tab.url) {
         setFormData(response.formData);
@@ -88,24 +87,21 @@ function Dashboard() {
 
       console.log('[Dashboard] Triggering manual scan on tab:', tab.id);
 
-      // Send scan command to content script
       const response = await chrome.tabs.sendMessage(tab.id, { action: 'SCAN_PAGE' });
-      
+
       if (response && response.success) {
         console.log('[Dashboard] Scan successful, found', response.data.forms.length, 'forms');
-        
-        // Wait a moment for background to process
+
         await new Promise(resolve => setTimeout(resolve, 300));
-        
-        // Get scanned data from background
+
         const bgResponse = await chrome.runtime.sendMessage({ action: 'GET_LAST_SCANNED_DATA' });
-        
+
         if (bgResponse && bgResponse.formData) {
           setFormData(bgResponse.formData);
           const numForms = bgResponse.formData.forms ? bgResponse.formData.forms.length : 0;
           setFormsDetected(numForms);
           setLastScannedUrl(tab.url);
-          
+
           if (numForms === 0) {
             alert('✅ Page scanned but no forms detected.\n\nMake sure:\n1. The page has <form> tags\n2. Form fields are visible\n3. Fields are not in iframes');
           } else {
@@ -119,8 +115,6 @@ function Dashboard() {
       }
     } catch (err) {
       console.error('[Dashboard] Scan failed:', err);
-      
-      // Check if content script is not injected
       if (err.message && err.message.includes('Could not establish connection')) {
         alert('⚠️ Scanner not loaded on this page.\n\nTry:\n1. Refresh the page\n2. Click Scan Page again\n3. Check if page is a chrome:// or extension:// page (not supported)');
       } else {
@@ -133,7 +127,6 @@ function Dashboard() {
 
   const handleAutofill = async () => {
     try {
-      // Get current form data
       const response = await chrome.runtime.sendMessage({ action: 'GET_LAST_SCANNED_DATA' });
       if (!response || !response.formData) {
         alert('Please scan the page first');
@@ -145,14 +138,16 @@ function Dashboard() {
         return;
       }
 
-      // Map profile to form
-      const mapping = mapProfileToForm(profile, response.formData);
-      
+      // FIX: mapProfileToForm expects the inner profile object { personal, education, ... }
+      // The context stores { profile: { personal, education, ... } } — unwrap one level.
+      const innerProfile = profile?.profile ?? profile;
+      const mapping = mapProfileToForm(innerProfile, response.formData);
+
       if (!mapping.matches || mapping.matches.length === 0) {
         alert('No matching fields found between your profile and the detected forms.');
         return;
       }
-      
+
       setMappingResult(mapping);
       setCurrentScreen('review');
     } catch (err) {
@@ -184,13 +179,11 @@ function Dashboard() {
 
   return (
     <div className="content">
-      {/* Welcome Section */}
       <div className="welcome-section">
         <h2 className="welcome-title">Hello, {getFirstName()}! 👋</h2>
         <p className="welcome-subtitle">Ready to autofill job applications</p>
       </div>
 
-      {/* Profile Stats */}
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-value">{profileCompletion}%</div>
@@ -202,25 +195,16 @@ function Dashboard() {
         </div>
       </div>
 
-      {/* Progress Bar */}
       <div className="progress-bar">
         <div className="progress-fill" style={{ width: `${profileCompletion}%` }}></div>
       </div>
       <div className="progress-text mb-24">{profileCompletion}% of profile fields filled</div>
 
-      {/* Action Buttons */}
       <div className="btn-group">
-        <button
-          className="btn btn-primary"
-          onClick={handleEditProfile}
-        >
+        <button className="btn btn-primary" onClick={handleEditProfile}>
           ✏️ Edit Profile
         </button>
-        <button
-          className="btn btn-secondary"
-          onClick={handleScanPage}
-          disabled={scanning}
-        >
+        <button className="btn btn-secondary" onClick={handleScanPage} disabled={scanning}>
           {scanning ? '🔄 Scanning...' : '🔍 Scan Page'}
         </button>
       </div>
@@ -233,14 +217,10 @@ function Dashboard() {
         ⚡ Autofill Form{formsDetected !== 1 ? 's' : ''}
       </button>
 
-      <button
-        className="btn btn-secondary btn-block mt-16"
-        onClick={handleLock}
-      >
+      <button className="btn btn-secondary btn-block mt-16" onClick={handleLock}>
         🔒 Lock Profile
       </button>
 
-      {/* Storage Meter */}
       <div className="storage-meter">
         <div className="storage-bar">
           <div className={getStorageBarClass()} style={{ width: `${(storageUsage / 5) * 100}%` }}></div>
