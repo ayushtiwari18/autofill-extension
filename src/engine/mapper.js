@@ -1,6 +1,11 @@
 /**
  * Field Mapper Module
- * Maps profile data to form fields using pattern matching and confidence scoring
+ * Maps profile data to form fields using pattern matching and confidence scoring.
+ *
+ * IMPORTANT: The `profile` argument passed into matchField / mapProfileToForm
+ * is always `storedProfile.profile` (the inner object), NOT the full stored object.
+ * getAllProfilePaths() returns paths like 'profile.personal.firstName' but we
+ * need to strip the leading 'profile.' before traversing the inner object.
  */
 
 import {
@@ -15,12 +20,27 @@ import { calculateConfidence } from './confidence.js';
 // PROFILE VALUE EXTRACTION
 // ============================================
 
+/**
+ * Extract a value from the profile object using a dot-notation path.
+ * Automatically strips a leading 'profile.' prefix if present,
+ * because the caller passes the inner profile object, not the wrapper.
+ *
+ * @param {Object} profile  - The inner profile object (profile.profile)
+ * @param {string} profilePath - e.g. 'profile.personal.firstName' OR 'personal.firstName'
+ * @returns {*} The value, or null if not found
+ */
 export function getProfileFieldValue(profile, profilePath) {
   try {
-    const keys = profilePath.split('.');
+    // Strip 'profile.' prefix — getAllProfilePaths() includes it but
+    // we receive the inner object, so traversal must start without it.
+    const normalizedPath = profilePath.startsWith('profile.')
+      ? profilePath.slice('profile.'.length)
+      : profilePath;
+
+    const keys = normalizedPath.split('.');
     let value = profile;
     for (const key of keys) {
-      if (value && typeof value === 'object' && key in value) {
+      if (value !== null && value !== undefined && typeof value === 'object' && key in value) {
         value = value[key];
       } else {
         return null;
@@ -114,7 +134,7 @@ export function matchField(formField, profile) {
           continue;
         }
         if (Array.isArray(profileValue) && profileValue.length === 0) {
-          console.log(`[Mapper]     ❌ Skills array is empty for: ${profilePath} — add skills to your profile`);
+          console.log(`[Mapper]     ❌ Skills array is empty for: ${profilePath}`);
           continue;
         }
         // ────────────────────────────────────────────────────────────────────
@@ -170,7 +190,12 @@ export function mapProfileToForm(profile, formData) {
 
     if (!profile || !formData || !formData.forms) {
       console.error('[Mapper] Invalid input data');
-      return { matches: [], unmatchedFormFields: [], unmatchedProfileFields: [], overallConfidence: 0, requiresReview: true, url: formData?.url || '', timestamp: new Date().toISOString(), error: 'Invalid input data' };
+      return {
+        matches: [], unmatchedFormFields: [], unmatchedProfileFields: [],
+        overallConfidence: 0, requiresReview: true,
+        url: formData?.url || '', timestamp: new Date().toISOString(),
+        error: 'Invalid input data'
+      };
     }
 
     console.log(`[Mapper] Processing ${formData.forms.length} form(s)`);
@@ -206,7 +231,10 @@ export function mapProfileToForm(profile, formData) {
         const value = getProfileFieldValue(profile, path);
         if (value !== null && value !== undefined && value !== '' &&
             (!Array.isArray(value) || value.length > 0)) {
-          unmatchedProfileFields.push({ path, value: Array.isArray(value) ? value.join(', ') : value });
+          unmatchedProfileFields.push({
+            path,
+            value: Array.isArray(value) ? value.join(', ') : value
+          });
         }
       }
     }
@@ -229,6 +257,11 @@ export function mapProfileToForm(profile, formData) {
     return result;
   } catch (error) {
     console.error('[Mapper] Error mapping profile to form:', error.message);
-    return { matches: [], unmatchedFormFields: [], unmatchedProfileFields: [], overallConfidence: 0, requiresReview: true, url: formData?.url || '', timestamp: new Date().toISOString(), error: error.message };
+    return {
+      matches: [], unmatchedFormFields: [], unmatchedProfileFields: [],
+      overallConfidence: 0, requiresReview: true,
+      url: formData?.url || '', timestamp: new Date().toISOString(),
+      error: error.message
+    };
   }
 }

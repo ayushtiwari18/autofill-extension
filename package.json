@@ -5,12 +5,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "webpack --mode production",
-    "dev": "webpack --mode development --watch",
+    "build": "webpack --config webpack.config.cjs --mode production",
+    "dev": "webpack --config webpack.config.cjs --mode development --watch",
     "clean": "rm -rf dist",
-    "test": "node --experimental-vm-modules node_modules/.bin/jest",
-    "test:coverage": "node --experimental-vm-modules node_modules/.bin/jest --coverage",
-    "test:watch": "node --experimental-vm-modules node_modules/.bin/jest --watch",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --config jest.config.cjs",
+    "test:coverage": "node --experimental-vm-modules node_modules/.bin/jest --config jest.config.cjs --coverage",
+    "test:watch": "node --experimental-vm-modules node_modules/.bin/jest --config jest.config.cjs --watch",
     "test:e2e": "playwright test --config=tests/e2e/playwright.config.js"
   },
   "keywords": [
