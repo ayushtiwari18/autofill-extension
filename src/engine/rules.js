@@ -7,10 +7,6 @@
 // FIELD PATTERNS
 // ============================================
 
-/**
- * Field matching patterns for all profile fields
- * Maps profile paths to matching rules
- */
 export const FIELD_PATTERNS = {
   // Personal Information
   'profile.personal.firstName': {
@@ -58,7 +54,7 @@ export const FIELD_PATTERNS = {
     fieldTypes: ['text', 'select'],
     weight: 1.0
   },
-  
+
   // Education
   'profile.education.degree': {
     patterns: ['degree', 'qualification', 'education level', 'highest degree'],
@@ -85,7 +81,7 @@ export const FIELD_PATTERNS = {
     fieldTypes: ['text', 'number'],
     weight: 1.0
   },
-  
+
   // Experience
   'profile.experience.currentRole': {
     patterns: ['current role', 'job title', 'position', 'role', 'current position', 'title'],
@@ -107,7 +103,7 @@ export const FIELD_PATTERNS = {
     fieldTypes: ['text', 'textarea'],
     weight: 1.0
   },
-  
+
   // Links
   'profile.links.linkedin': {
     patterns: ['linkedin', 'linkedin url', 'linkedin profile', 'linkedin link'],
@@ -129,7 +125,7 @@ export const FIELD_PATTERNS = {
     fieldTypes: ['url', 'text'],
     weight: 1.0
   },
-  
+
   // Documents
   'profile.documents.resume': {
     patterns: ['resume', 'cv', 'curriculum vitae', 'upload resume', 'attach resume'],
@@ -142,9 +138,6 @@ export const FIELD_PATTERNS = {
 // FIELD ALIASES
 // ============================================
 
-/**
- * Alternative names for common fields
- */
 export const FIELD_ALIASES = {
   'phone': ['mobile', 'telephone', 'cell', 'contact number', 'tel'],
   'first name': ['given name', 'forename', 'christian name'],
@@ -167,21 +160,31 @@ export const FIELD_ALIASES = {
 // ============================================
 
 /**
- * Keywords that prevent false matches
+ * RULES for negative keywords:
+ * - Must be a STANDALONE word that would appear in a field label/name
+ * - Must NOT be a substring of a legitimate label for this field
+ *
+ * FIXED: Removed 'address' from email negatives — 'Email Address' contains
+ * the word 'address' and was scoring 0 for any email field with that label.
+ * The negative keyword check uses .includes() so 'address' inside
+ * 'email address' triggered a false negative kill.
  */
 export const NEGATIVE_KEYWORDS = {
   'profile.personal.firstName': ['last', 'surname', 'family'],
-  'profile.personal.lastName': ['first', 'given', 'forename'],
-  'profile.personal.email': ['phone', 'mobile', 'address'],
-  'profile.personal.phone': ['email', 'mail'],
-  'profile.personal.address': ['email', 'phone'],
-  'profile.education.degree': ['major', 'university', 'year'],
-  'profile.education.major': ['degree', 'university', 'year'],
+  'profile.personal.lastName':  ['first', 'given', 'forename'],
+  'profile.personal.email':     ['phone', 'mobile'],
+  //                             ^^^^^^^^^^^^^^^^^ 'address' REMOVED
+  //                             'Email Address' label contains 'address'
+  //                             and was being killed by its own negative keyword
+  'profile.personal.phone':     ['email', 'mail'],
+  'profile.personal.address':   ['email', 'phone'],
+  'profile.education.degree':   ['major', 'university', 'year'],
+  'profile.education.major':    ['degree', 'university', 'year'],
   'profile.education.university': ['degree', 'major', 'year'],
-  'profile.experience.currentRole': ['company', 'employer'],
+  'profile.experience.currentRole':    ['company', 'employer'],
   'profile.experience.currentCompany': ['role', 'title', 'position'],
-  'profile.links.linkedin': ['github', 'portfolio'],
-  'profile.links.github': ['linkedin', 'portfolio'],
+  'profile.links.linkedin':  ['github', 'portfolio'],
+  'profile.links.github':    ['linkedin', 'portfolio'],
   'profile.links.portfolio': ['linkedin', 'github']
 };
 
@@ -189,37 +192,18 @@ export const NEGATIVE_KEYWORDS = {
 // HELPER FUNCTIONS
 // ============================================
 
-/**
- * Get all available profile field paths
- * @returns {string[]} - Array of profile paths
- */
 export function getAllProfilePaths() {
   return Object.keys(FIELD_PATTERNS);
 }
 
-/**
- * Get matching pattern for profile path
- * @param {string} profilePath - Profile field path
- * @returns {Object|null} - Pattern object or null
- */
 export function getPatternForPath(profilePath) {
   return FIELD_PATTERNS[profilePath] || null;
 }
 
-/**
- * Get negative keywords for profile path
- * @param {string} profilePath - Profile field path
- * @returns {string[]} - Array of negative keywords
- */
 export function getNegativeKeywords(profilePath) {
   return NEGATIVE_KEYWORDS[profilePath] || [];
 }
 
-/**
- * Check if profile path exists
- * @param {string} profilePath - Profile field path
- * @returns {boolean} - true if path exists
- */
 export function isValidProfilePath(profilePath) {
   return profilePath in FIELD_PATTERNS;
 }
