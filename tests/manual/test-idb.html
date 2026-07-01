@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>A1 — IDB Module Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 40px auto; padding: 0 20px; background: #0f0f17; color: #cdd6f4; }
+    h1   { color: #89b4fa; margin-bottom: 4px; }
+    p    { color: #6c7086; margin-top: 0; }
+    .card { background: #1e1e2e; border: 1px solid #313244; border-radius: 10px; padding: 20px 24px; margin: 16px 0; }
+    .card h2 { margin: 0 0 12px; font-size: 1rem; color: #a6e3a1; }
+    button { background: #89b4fa; color: #1e1e2e; border: none; padding: 8px 18px;
+             border-radius: 6px; cursor: pointer; font-weight: 600; margin: 4px 4px 4px 0; }
+    button:hover { background: #74c7ec; }
+    button.danger { background: #f38ba8; }
+    pre  { background: #181825; border-radius: 6px; padding: 12px 16px; font-size: 0.82rem;
+           overflow-x: auto; color: #cdd6f4; white-space: pre-wrap; max-height: 260px; overflow-y: auto; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; margin-left: 8px; }
+    .pass  { background: #a6e3a1; color: #1e1e2e; }
+    .fail  { background: #f38ba8; color: #1e1e2e; }
+    .info  { background: #89b4fa; color: #1e1e2e; }
+    #checklist li { list-style: none; padding: 6px 0; font-size: 0.92rem; border-bottom: 1px solid #313244; }
+    #checklist li:last-child { border: none; }
+    .tick { margin-right: 8px; }
+  </style>
+</head>
+<body>
+
+<h1>🗄️ Commit A1 — IndexedDB Module Test</h1>
+<p>Open DevTools → Application → IndexedDB to verify visually. Run each test below in order.</p>
+
+<!-- ── CHECKLIST ─────────────────────────────────────────────────────── -->
+<div class="card">
+  <h2>✅ Test Checklist</h2>
+  <ul id="checklist">
+    <li id="c1"><span class="tick">⬜</span> DB "smartfill_db" appears in IndexedDB panel</li>
+    <li id="c2"><span class="tick">⬜</span> All 3 stores visible: profile, field_memory, platform_patterns</li>
+    <li id="c3"><span class="tick">⬜</span> Can write a test profile entry and read it back</li>
+    <li id="c4"><span class="tick">⬜</span> Can write a field_memory entry and read by fingerprint</li>
+    <li id="c5"><span class="tick">⬜</span> Index "by_domain" returns correct results on field_memory</li>
+  </ul>
+</div>
+
+<!-- ── TEST 1: Open DB ───────────────────────────────────────────────── -->
+<div class="card">
+  <h2>Test 1 — Open DB (checks C1 + C2)</h2>
+  <button onclick="runOpenDB()">Open DB</button>
+  <pre id="out1">—</pre>
+</div>
+
+<!-- ── TEST 2: Profile ──────────────────────────────────────────────── -->
+<div class="card">
+  <h2>Test 2 — Save &amp; Read Profile (checks C3)</h2>
+  <button onclick="runSaveProfile()">Save Test Profile</button>
+  <button onclick="runGetProfile()">Read Profile</button>
+  <button onclick="runDeleteProfile()" class="danger">Delete Profile</button>
+  <pre id="out2">—</pre>
+</div>
+
+<!-- ── TEST 3: Field Memory ──────────────────────────────────────────── -->
+<div class="card">
+  <h2>Test 3 — Record Fill &amp; Read Field Memory (checks C4)</h2>
+  <button onclick="runRecordFill()">Record Fill (Full Name)</button>
+  <button onclick="runRecordFill()">Record Again (+1 count)</button>
+  <button onclick="runGetMemory()">Read by Fingerprint</button>
+  <button onclick="runRecordFill2()">Record Different Value</button>
+  <pre id="out3">—</pre>
+</div>
+
+<!-- ── TEST 4: Domain Index ──────────────────────────────────────────── -->
+<div class="card">
+  <h2>Test 4 — Query by Domain Index (checks C5)</h2>
+  <button onclick="runSeedDomain()">Seed 3 entries (same domain)</button>
+  <button onclick="runQueryDomain()">Query by domain</button>
+  <pre id="out4">—</pre>
+</div>
+
+<!-- ── RESET ─────────────────────────────────────────────────────────── -->
+<div class="card">
+  <h2>🔴 Reset / Danger Zone</h2>
+  <button class="danger" onclick="runClearAll()">Clear All Field Memory</button>
+  <button class="danger" onclick="runDeleteDB()">Delete Entire DB</button>
+  <pre id="out5">—</pre>
+</div>
+
+<script type="module">
+  // ── Inline the IDB module here so the test works without a build step ──
+  // (paste of src/storage/idb.js logic, self-contained)
+
+  const DB_NAME    = 'smartfill_db';
+  const DB_VERSION = 1;
+  const STORES     = { PROFILE: 'profile', FIELD_MEMORY: 'field_memory', PLATFORM_PATTERNS: 'platform_patterns' };
+  const PROFILE_KEY = 'user_profile';
+
+  let _dbPromise = null;
+  function openDB() {
+    if (_dbPromise) return _dbPromise;
+    _dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains(STORES.PROFILE))
+          db.createObjectStore(STORES.PROFILE, { keyPath: 'key' });
+        if (!db.objectStoreNames.contains(STORES.FIELD_MEMORY)) {
+          const ms = db.createObjectStore(STORES.FIELD_MEMORY, { keyPath: 'fingerprint' });
+          ms.createIndex('by_domain', 'domain', { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORES.PLATFORM_PATTERNS)) {
+          const ps = db.createObjectStore(STORES.PLATFORM_PATTERNS, { keyPath: 'id', autoIncrement: true });
+          ps.createIndex('by_domain', 'domain', { unique: false });
+        }
+      };
+      req.onsuccess = (e) => resolve(e.target.result);
+      req.onerror   = (e) => { _dbPromise = null; reject(e.target.error); };
+    });
+    return _dbPromise;
+  }
+
+  async function saveProfile(data) {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const t = db.transaction(STORES.PROFILE, 'readwrite');
+      t.objectStore(STORES.PROFILE).put({ ...data, key: PROFILE_KEY, updatedAt: Date.now() });
+      t.oncomplete = res; t.onerror = e => rej(e.target.error);
+    });
+  }
+  async function getProfile() {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const r = db.transaction(STORES.PROFILE,'readonly').objectStore(STORES.PROFILE).get(PROFILE_KEY);
+      r.onsuccess = e => res(e.target.result || null);
+      r.onerror   = e => rej(e.target.error);
+    });
+  }
+  async function deleteProfile() {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const t = db.transaction(STORES.PROFILE,'readwrite');
+      t.objectStore(STORES.PROFILE).delete(PROFILE_KEY);
+      t.oncomplete = res; t.onerror = e => rej(e.target.error);
+    });
+  }
+  async function recordFill({ fingerprint, domain, label, fieldType, value }) {
+    const db = await openDB();
+    const existing = await new Promise((res,rej)=>{
+      const r = db.transaction(STORES.FIELD_MEMORY,'readonly').objectStore(STORES.FIELD_MEMORY).get(fingerprint);
+      r.onsuccess=e=>res(e.target.result||null); r.onerror=e=>rej(e.target.error);
+    });
+    const now = Date.now();
+    let record;
+    if (existing) {
+      const entry = existing.values.find(v=>v.value===value);
+      if (entry) { entry.usedCount++; entry.lastUsed=now; }
+      else existing.values.push({value,usedCount:1,lastUsed:now});
+      record = { ...existing, updatedAt: now };
+    } else {
+      record = { fingerprint,domain,label,fieldType,values:[{value,usedCount:1,lastUsed:now}],confirmed:false,createdAt:now,updatedAt:now };
+    }
+    return new Promise((res,rej)=>{
+      const t = db.transaction(STORES.FIELD_MEMORY,'readwrite');
+      t.objectStore(STORES.FIELD_MEMORY).put(record);
+      t.oncomplete=res; t.onerror=e=>rej(e.target.error);
+    });
+  }
+  async function getFieldMemory(fingerprint) {
+    const db = await openDB();
+    return new Promise((res,rej)=>{
+      const r = db.transaction(STORES.FIELD_MEMORY,'readonly').objectStore(STORES.FIELD_MEMORY).get(fingerprint);
+      r.onsuccess=e=>res(e.target.result||null); r.onerror=e=>rej(e.target.error);
+    });
+  }
+  async function getFieldMemoriesByDomain(domain) {
+    const db = await openDB();
+    return new Promise((res,rej)=>{
+      const idx = db.transaction(STORES.FIELD_MEMORY,'readonly').objectStore(STORES.FIELD_MEMORY).index('by_domain');
+      const r = idx.getAll(domain);
+      r.onsuccess=e=>res(e.target.result||[]); r.onerror=e=>rej(e.target.error);
+    });
+  }
+  async function clearAllFieldMemory() {
+    const db = await openDB();
+    return new Promise((res,rej)=>{
+      const t = db.transaction(STORES.FIELD_MEMORY,'readwrite');
+      t.objectStore(STORES.FIELD_MEMORY).clear();
+      t.oncomplete=res; t.onerror=e=>rej(e.target.error);
+    });
+  }
+
+  function show(id, data, isErr) {
+    const el = document.getElementById(id);
+    el.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+    el.style.color = isErr ? '#f38ba8' : '#a6e3a1';
+  }
+  function tick(id, pass) {
+    const li   = document.getElementById(id);
+    const span = li.querySelector('.tick');
+    span.textContent = pass ? '✅' : '❌';
+  }
+
+  // ── Test runners ─────────────────────────────────────────────────────
+
+  window.runOpenDB = async () => {
+    try {
+      const db = await openDB();
+      const stores = [...db.objectStoreNames];
+      const hasAll = ['profile','field_memory','platform_patterns'].every(s=>stores.includes(s));
+      show('out1', { status:'opened', stores, version: db.version });
+      tick('c1', true);
+      tick('c2', hasAll);
+    } catch(e) { show('out1', String(e), true); }
+  };
+
+  window.runSaveProfile = async () => {
+    try {
+      await saveProfile({
+        personal:   { firstName:'Ayush', lastName:'Tiwari', email:'ayush@test.com', phone:'+91-9876543210' },
+        education:  { university:'IIT Bombay', degree:'B.Tech', major:'CS', graduationYear:'2024', gpa:'8.5' },
+        experience: { currentCompany:'Acme Corp', currentRole:'SDE', yearsOfExperience:'2', skills:'JS, React' },
+        links:      { linkedin:'linkedin.com/in/ayush', github:'github.com/ayushtiwari18' },
+      });
+      show('out2', '✅ Profile saved — now click "Read Profile"');
+    } catch(e) { show('out2', String(e), true); }
+  };
+
+  window.runGetProfile = async () => {
+    try {
+      const p = await getProfile();
+      show('out2', p);
+      tick('c3', p !== null && p.personal?.firstName === 'Ayush');
+    } catch(e) { show('out2', String(e), true); }
+  };
+
+  window.runDeleteProfile = async () => {
+    try {
+      await deleteProfile();
+      const p = await getProfile();
+      show('out2', p === null ? '✅ Deleted — getProfile returns null' : '❌ Delete failed');
+    } catch(e) { show('out2', String(e), true); }
+  };
+
+  const FP = 'docs.google.com::full name::text';
+  window.runRecordFill = async () => {
+    try {
+      await recordFill({ fingerprint: FP, domain:'docs.google.com', label:'full name', fieldType:'text', value:'Ayush Tiwari' });
+      const m = await getFieldMemory(FP);
+      show('out3', m);
+      tick('c4', m !== null && m.values?.[0]?.value === 'Ayush Tiwari');
+    } catch(e) { show('out3', String(e), true); }
+  };
+
+  window.runGetMemory = async () => {
+    try {
+      const m = await getFieldMemory(FP);
+      show('out3', m || 'null — record not found');
+    } catch(e) { show('out3', String(e), true); }
+  };
+
+  window.runRecordFill2 = async () => {
+    try {
+      await recordFill({ fingerprint: FP, domain:'docs.google.com', label:'full name', fieldType:'text', value:'A. Tiwari' });
+      const m = await getFieldMemory(FP);
+      show('out3', m);
+    } catch(e) { show('out3', String(e), true); }
+  };
+
+  window.runSeedDomain = async () => {
+    try {
+      await recordFill({ fingerprint:'docs.google.com::email address::text', domain:'docs.google.com', label:'email address', fieldType:'text', value:'ayush@test.com' });
+      await recordFill({ fingerprint:'docs.google.com::contact number::text', domain:'docs.google.com', label:'contact number', fieldType:'text', value:'+91-9876543210' });
+      show('out4', '✅ 3 entries seeded for docs.google.com (Full Name + Email + Contact Number)');
+    } catch(e) { show('out4', String(e), true); }
+  };
+
+  window.runQueryDomain = async () => {
+    try {
+      const results = await getFieldMemoriesByDomain('docs.google.com');
+      show('out4', results);
+      tick('c5', results.length >= 2);
+    } catch(e) { show('out4', String(e), true); }
+  };
+
+  window.runClearAll = async () => {
+    try {
+      await clearAllFieldMemory();
+      show('out5', '✅ All field_memory cleared');
+    } catch(e) { show('out5', String(e), true); }
+  };
+
+  window.runDeleteDB = async () => {
+    try {
+      _dbPromise = null;
+      const req = indexedDB.deleteDatabase(DB_NAME);
+      req.onsuccess = () => { show('out5','✅ DB deleted — refresh page to recreate'); };
+      req.onerror   = e => show('out5', String(e.target.error), true);
+    } catch(e) { show('out5', String(e), true); }
+  };
+</script>
+</body>
+</html>
