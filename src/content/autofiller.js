@@ -1,32 +1,39 @@
 /**
- * autofiller.js — SmartFill (Step 2: fuzzy engine upgrade)
+ * autofiller.js — SmartFill (Step 3: Adaptive Learning Loop)
  *
- * PRIMARY ENGINE: mapper.js (Levenshtein confidence scoring)
- * FALLBACK ENGINE: simpleMapper.js (keyword lookup, kept for safety)
+ * PRIMARY ENGINE:   mapper.js (Levenshtein confidence scoring)
+ * FALLBACK ENGINE:  simpleMapper.js (keyword lookup)
+ * MEMORY ENGINE:    idb.js field_memory (adaptive, per-field learning)
  *
- * Flow per field focus:
- *   focus → runAutofill → mapProfileToForm (mapper.js)
- *         → confidence >= 0.55 → showTooltip → onAccept → fillElementDirectly
- *         → confidence < 0.55 or 0 matches → try simpleMapper fallback
+ * Flow per field focus (updated):
+ *   focus → check field_memory (getTopSuggestions)
+ *         → memory hit  → showTooltip(memory value) → onAccept → fill → recordFill ✅
+ *         → no memory   → runAutofill (mapper → simpleMapper fallback)
+ *                       → showTooltip(profile value) → onAccept → fill → recordFill ✅
+ *         → no match    → silent (no tooltip, no fill)
  *
- * FIX: removed dead import of executeAutofill (was imported but never used).
- * FIX: added _tooltipActive guard + debounce to prevent duplicate suggestions
- *      on rapid focus/blur cycles (e.g. Google Forms typeahead re-focus bursts).
+ * recordFill is called ONLY on confirmed fills (user accepted or silent offscreen).
+ * Rejected/dismissed suggestions are NOT recorded.
  */
 
 import { loadProfile as loadProfileFromMatcher }  from './profileMatcher.js';
 import { showTooltip, hideTooltip }                from './tooltip.js';
-import { mapProfileToForm }                        from '../engine/mapper.js';       // PRIMARY
-import { simpleMapProfileToForm }                  from '../engine/simpleMapper.js'; // FALLBACK
+import { mapProfileToForm }                        from '../engine/mapper.js';
+import { simpleMapProfileToForm }                  from '../engine/simpleMapper.js';
+import { recordFill, getTopSuggestions }           from '../storage/idb.js';
+import { buildFingerprint }                        from '../engine/fingerprint.js';
 
 const DOMAIN     = window.location.hostname;
 const IS_IFRAME  = window.self !== window.top;
 const FRAME_TYPE = IS_IFRAME ? 'IFRAME' : 'TOP';
 
 const CONFIDENCE_THRESHOLD = 0.55;
+const FOCUS_DEBOUNCE_MS    = 300;
 
-// Debounce delay (ms) — absorbs rapid focus bursts from Google Forms / React inputs
-const FOCUS_DEBOUNCE_MS = 300;
+// ── Memory suggestion threshold ──────────────────────────────────────────────
+// A memory hit is used directly (skipping mapper) only if it has been used
+// at least this many times. Prevents a single accidental fill from dominating.
+const MEMORY_MIN_USED = 1;
 
 let _profileCache = null;
 async function getProfile() {
@@ -205,22 +212,27 @@ export function attachAutofiller(fieldInfo) {
   const isSelect = fieldInfo.type === 'select' || el.tagName === 'SELECT' ||
                    el.getAttribute('role') === 'listbox';
 
-  console.log(`[Autofiller][${FRAME_TYPE}] attachAutofiller → ` +
-    `label="${fieldInfo.label}" el=${el.tagName} type=${fieldInfo.type} on ${DOMAIN}`);
+  // ── Build a stable fingerprint for this field ─────────────────────────────
+  // Format: "docs.google.com::email address::text"
+  // Used as the key into field_memory for adaptive learning.
+  const fingerprint = buildFingerprint(
+    DOMAIN,
+    fieldInfo.label || fieldInfo.ariaLabel || '',
+    fieldInfo.type  || el.type || 'text'
+  );
 
-  // ── Duplicate-suggestion guard ───────────────────────────────────────
-  // Prevents stacked tooltips when a field rapidly blurs+refocuses
-  // (common in Google Forms typeahead, React controlled inputs, etc.)
-  let _tooltipActive = false;
+  console.log(`[Autofiller][${FRAME_TYPE}] attachAutofiller → ` +
+    `label="${fieldInfo.label}" el=${el.tagName} type=${fieldInfo.type} ` +
+    `fingerprint="${fingerprint}" on ${DOMAIN}`);
+
+  // ── Duplicate-suggestion guard ────────────────────────────────────────────
+  let _tooltipActive     = false;
   let _focusDebounceTimer = null;
-  // ─────────────────────────────────────────────────────────────────────
 
   el.addEventListener('focus', () => {
-    // Debounce: cancel any pending handler and restart the timer
     clearTimeout(_focusDebounceTimer);
     _focusDebounceTimer = setTimeout(async () => {
 
-      // Guard: if a tooltip is already showing for this element, do nothing
       if (_tooltipActive) {
         console.log(`[Autofiller][${FRAME_TYPE}] tooltip already active — skipping duplicate focus for "${fieldInfo.label}"`);
         return;
@@ -233,39 +245,105 @@ export function attachAutofiller(fieldInfo) {
         return;
       }
 
-      const match = await runAutofill(fieldInfo, el);
-      if (!match) return;
+      // ── STEP 1: Check field_memory FIRST ─────────────────────────────────
+      // If the user has filled this exact field before (same domain+label+type),
+      // use their past answer directly — no mapper needed.
+      let memorySuggestion = null;
+      if (fingerprint) {
+        try {
+          const topSuggestions = await getTopSuggestions(fingerprint, 1);
+          if (topSuggestions.length > 0 && topSuggestions[0].usedCount >= MEMORY_MIN_USED) {
+            memorySuggestion = topSuggestions[0];
+            console.log(`[Autofiller][${FRAME_TYPE}] 🧠 memory hit → "${memorySuggestion.value}" ` +
+              `(usedCount=${memorySuggestion.usedCount} score=${memorySuggestion.score?.toFixed(3)})`);
+          }
+        } catch (memErr) {
+          console.warn(`[Autofiller][${FRAME_TYPE}] memory lookup failed (non-fatal):`, memErr);
+        }
+      }
 
+      // ── STEP 2: Resolve the value to suggest ─────────────────────────────
+      // Memory hit → use it. Otherwise fall through to mapper.
+      const suggestionValue = memorySuggestion?.value ?? null;
+      const suggestionSource = memorySuggestion ? 'memory' : 'profile';
+
+      let matchValue = suggestionValue;
+      if (!matchValue) {
+        const match = await runAutofill(fieldInfo, el);
+        if (!match) return;
+        matchValue = match.profileValue;
+      }
+
+      // ── STEP 3: Fill or show tooltip ──────────────────────────────────────
       const rect    = el.getBoundingClientRect();
       const visible = rect.width > 0 && rect.height > 0 &&
                       rect.top < window.innerHeight && rect.bottom > 0;
 
       if (isSelect) {
-        console.log(`[Autofiller][${FRAME_TYPE}] SELECT fill → "${match.profileValue}"`);
-        const ok = handleSelectFill(el, match.profileValue);
-        if (ok) showBadge(el);
+        console.log(`[Autofiller][${FRAME_TYPE}] SELECT fill → "${matchValue}" (source: ${suggestionSource})`);
+        const ok = handleSelectFill(el, matchValue);
+        if (ok) {
+          showBadge(el);
+          // Record the fill
+          if (fingerprint) {
+            recordFill({
+              fingerprint,
+              domain:    DOMAIN,
+              label:     fieldInfo.label || '',
+              fieldType: fieldInfo.type  || 'select',
+              value:     matchValue,
+            }).catch(e => console.warn(`[Autofiller][${FRAME_TYPE}] recordFill error:`, e));
+          }
+        }
         return;
       }
 
       if (visible) {
         _tooltipActive = true;
-        console.log(`[Autofiller][${FRAME_TYPE}] showing tooltip for label="${fieldInfo.label}"`);
-        showTooltip(el, { label: fieldInfo.label, value: match.profileValue }, (accepted) => {
-          console.log(`[Autofiller][${FRAME_TYPE}] ✅ accepted → "${fieldInfo.label}" = "${accepted}"`);
-          const ok = fillElementDirectly(el, accepted);
-          if (ok) showBadge(el);
-          _tooltipActive = false;
-        });
+        const tooltipIcon = suggestionSource === 'memory' ? '🧠' : '💡';
+        console.log(`[Autofiller][${FRAME_TYPE}] showing tooltip (${tooltipIcon} ${suggestionSource}) for label="${fieldInfo.label}"`);
+
+        showTooltip(
+          el,
+          { label: fieldInfo.label, value: matchValue, icon: tooltipIcon },
+          (accepted) => {
+            console.log(`[Autofiller][${FRAME_TYPE}] ✅ accepted → "${fieldInfo.label}" = "${accepted}" (source: ${suggestionSource})`);
+            const ok = fillElementDirectly(el, accepted);
+            if (ok) {
+              showBadge(el);
+              // ── Record this fill into field_memory ──────────────────────
+              if (fingerprint) {
+                recordFill({
+                  fingerprint,
+                  domain:    DOMAIN,
+                  label:     fieldInfo.label || '',
+                  fieldType: fieldInfo.type  || el.type || 'text',
+                  value:     accepted,
+                }).catch(e => console.warn(`[Autofiller][${FRAME_TYPE}] recordFill error:`, e));
+              }
+            }
+            _tooltipActive = false;
+          }
+        );
       } else {
-        console.log(`[Autofiller][${FRAME_TYPE}] offscreen — silent fill "${fieldInfo.label}" → "${match.profileValue}"`);
-        fillElementDirectly(el, match.profileValue);
+        // Silent fill for offscreen fields — always record
+        console.log(`[Autofiller][${FRAME_TYPE}] offscreen — silent fill "${fieldInfo.label}" → "${matchValue}" (source: ${suggestionSource})`);
+        const ok = fillElementDirectly(el, matchValue);
+        if (ok && fingerprint) {
+          recordFill({
+            fingerprint,
+            domain:    DOMAIN,
+            label:     fieldInfo.label || '',
+            fieldType: fieldInfo.type  || el.type || 'text',
+            value:     matchValue,
+          }).catch(e => console.warn(`[Autofiller][${FRAME_TYPE}] recordFill error:`, e));
+        }
       }
 
     }, FOCUS_DEBOUNCE_MS);
   });
 
   el.addEventListener('blur', () => {
-    // Clear any pending debounce so a quick focus→blur→focus doesn't fire twice
     clearTimeout(_focusDebounceTimer);
     _tooltipActive = false;
     setTimeout(() => hideTooltip(), 300);
