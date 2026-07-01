@@ -1,52 +1,59 @@
 /**
- * tooltip.js — SmartFill A6 (patched)
- * Renders a suggestion chip below a focused field.
+ * tooltip.js — SmartFill A7 (fix: click-before-dismiss race)
  *
- * Usage:
- *   import { showTooltip, hideTooltip } from './tooltip.js';
- *   showTooltip(el, { label: 'email', value: 'a@b.com' }, onAccept);
+ * BUG FIXED: Clicking the suggestion row closed the tooltip without
+ * filling the value.
+ *
+ * Root cause: `onOutside` was on 'mousedown' with capture=true, so it
+ * ran BEFORE the row's own mousedown handler, destroying the tooltip
+ * before the 'click' event could fire.
+ *
+ * Fix: move outside-dismiss to 'click' in bubble phase. The row's
+ * click handler calls accept() and hideTooltip() first; by the time
+ * the document click listener runs, the tooltip is already gone and
+ * the condition `!tip.contains(e.target)` is vacuously irrelevant.
  */
 
-let _current = null;  // { el, tooltipEl, cleanup }
+let _current   = null;   // { el, tooltipEl, cleanup }
 let _hideTimer = null;
 
 /**
  * Show a suggestion tooltip below `el`.
- * @param {HTMLElement}  el        — the input field
+ * @param {HTMLElement}  el
  * @param {{ label: string, value: string }} suggestion
  * @param {Function}     onAccept  — called with (value) when user clicks
  */
 export function showTooltip(el, suggestion, onAccept) {
-  hideTooltip();  // dismiss any existing
+  hideTooltip(); // dismiss any existing
 
   const tip = document.createElement('div');
-  tip.className   = 'sf-tooltip';
+  tip.className = 'sf-tooltip';
   tip.setAttribute('role', 'listbox');
   tip.setAttribute('aria-label', 'SmartFill suggestion');
 
   // — Main row
   const row = document.createElement('div');
-  row.className   = 'sf-tooltip-row';
+  row.className = 'sf-tooltip-row';
   row.setAttribute('role', 'option');
-  row.tabIndex    = 0;
+  row.tabIndex  = 0;
 
   const icon = document.createElement('span');
-  icon.className  = 'sf-tooltip-icon';
+  icon.className   = 'sf-tooltip-icon';
   icon.textContent = '💡';
 
   const labelEl = document.createElement('span');
-  labelEl.className  = 'sf-tooltip-label';
+  labelEl.className   = 'sf-tooltip-label';
   labelEl.textContent = suggestion.label;
 
   const valueEl = document.createElement('span');
-  valueEl.className  = 'sf-tooltip-value';
+  valueEl.className   = 'sf-tooltip-value';
   valueEl.textContent = suggestion.value;
 
   row.append(icon, labelEl, valueEl);
 
   // — Hint footer
   const hint = document.createElement('div');
-  hint.className  = 'sf-tooltip-hint';
+  hint.className   = 'sf-tooltip-hint';
   hint.textContent = 'Click or ↵ to fill  ·  Esc to dismiss';
 
   tip.append(row, hint);
@@ -54,40 +61,59 @@ export function showTooltip(el, suggestion, onAccept) {
 
   _positionTooltip(tip, el);
 
-  // — Accept handlers
-  const accept = () => { onAccept(suggestion.value); hideTooltip(); };
+  // ─── Accept handler ───────────────────────────────────────────────
+  const accept = () => {
+    onAccept(suggestion.value);
+    hideTooltip();
+  };
 
-  row.addEventListener('click', accept);
-  row.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); accept(); }
+  // Click on the row → accept
+  row.addEventListener('click', (e) => {
+    e.stopPropagation(); // prevent document click handler from also running
+    accept();
   });
 
-  // Cancel the blur-triggered hide timer when user mousedowns inside tooltip
-  tip.addEventListener('mousedown', (e) => {
-    e.preventDefault();   // prevents input from losing focus prematurely
+  // Keyboard: Enter / Space on focused row → accept
+  row.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      accept();
+    }
+  });
+
+  // Cancel the blur-schedule timer when user mouses inside the tooltip
+  // (do NOT preventDefault here — we moved outside-detect to 'click')
+  tip.addEventListener('mousedown', () => {
     if (_hideTimer) {
       clearTimeout(_hideTimer);
       _hideTimer = null;
     }
   });
 
-  // — Dismiss on Esc or outside click
-  const onKeyDown = (e) => { if (e.key === 'Escape') hideTooltip(); };
+  // ─── Dismiss listeners ────────────────────────────────────────────
+  const onKeyDown = (e) => {
+    if (e.key === 'Escape') hideTooltip();
+  };
+
+  // Use 'click' (bubble phase, no capture) so the row's own click
+  // handler runs first. If the click was inside the tooltip, the row
+  // handler already called e.stopPropagation() so this never fires.
   const onOutside = (e) => {
     if (!tip.contains(e.target) && e.target !== el) hideTooltip();
   };
-  const onScroll  = () => _positionTooltip(tip, el);
 
-  document.addEventListener('keydown',  onKeyDown,  true);
-  document.addEventListener('mousedown', onOutside, true);
-  document.addEventListener('scroll',   onScroll,  true);
-  window.addEventListener  ('resize',   onScroll);
+  const onScroll = () => _positionTooltip(tip, el);
+
+  document.addEventListener('keydown', onKeyDown, true);
+  document.addEventListener('click',   onOutside);        // bubble, no capture
+  document.addEventListener('scroll',  onScroll,  true);
+  window.addEventListener  ('resize',  onScroll);
 
   const cleanup = () => {
-    document.removeEventListener('keydown',   onKeyDown,  true);
-    document.removeEventListener('mousedown', onOutside,  true);
-    document.removeEventListener('scroll',    onScroll,   true);
-    window.removeEventListener  ('resize',    onScroll);
+    document.removeEventListener('keydown', onKeyDown, true);
+    document.removeEventListener('click',   onOutside);
+    document.removeEventListener('scroll',  onScroll,  true);
+    window.removeEventListener  ('resize',  onScroll);
   };
 
   _current = { el, tooltipEl: tip, cleanup };
