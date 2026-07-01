@@ -1,7 +1,7 @@
 /**
  * fieldScanner.js — DOM field discovery for SmartFill
  * ─────────────────────────────────────────────────────────
- * Scans the current page for fillable form fields.
+ * Scans the current page for visible, fillable form fields.
  * Returns a list of FieldInfo objects, each with:
  *   { el, fingerprint, label, rawLabel, fieldType, type, selector }
  *
@@ -13,6 +13,8 @@
  *     can read fieldInfo.type without getting undefined.
  *   - Added `selector` property (CSS path to the element) so executor.js
  *     findElement() can reliably locate the element via querySelector.
+ *   - Skip SmartFill's own tooltip host element so it never enters the
+ *     scan pipeline (prevents spurious re-map + IDB calls on every hover).
  */
 
 import { fingerprintField } from '../engine/fingerprint.js';
@@ -37,17 +39,39 @@ function isVisible(el) {
   if (style.opacity    === '0')       return false;
 
   const rect = el.getBoundingClientRect();
-  // Element must have some size (not zero-area)
   if (rect.width === 0 && rect.height === 0) return false;
 
   return true;
 }
 
 // ───────────────────────────────────────────────────────────
+// SMARTFILL SELF-EXCLUSION GUARD
+// ───────────────────────────────────────────────────────────
+
+/**
+ * Returns true if `el` is a SmartFill-owned UI element that must never
+ * enter the scan pipeline.
+ *
+ * Two conditions (either is sufficient):
+ *   1. The element carries `data-sf-tooltip-host` — the Shadow DOM host
+ *      injected by tooltip.js.
+ *   2. The fingerprinted label starts with "smartfill" — catches any
+ *      future SmartFill-owned widgets whose host attribute may differ.
+ *
+ * @param {Element} el
+ * @param {string}  label  — normalised label already derived by fingerprintField
+ * @returns {boolean}
+ */
+function isSmartFillOwned(el, label) {
+  if (el.hasAttribute('data-sf-tooltip-host')) return true;
+  if (label && label.toLowerCase().startsWith('smartfill')) return true;
+  return false;
+}
+
+// ───────────────────────────────────────────────────────────
 // FIELD SELECTORS
 // ───────────────────────────────────────────────────────────
 
-// CSS selectors for standard fillable inputs
 const INPUT_SELECTOR = [
   'input[type="text"]',
   'input[type="email"]',
@@ -56,12 +80,11 @@ const INPUT_SELECTOR = [
   'input[type="number"]',
   'input[type="date"]',
   'input[type="search"]',
-  'input:not([type])',          // bare <input> defaults to text
+  'input:not([type])',
   'textarea',
   'select',
 ].join(',');
 
-// ARIA role-based widgets (Google Forms, custom dropdowns)
 const ROLE_SELECTOR = [
   'div[role="radiogroup"]',
   'div[role="group"]',
@@ -76,22 +99,15 @@ const ROLE_SELECTOR = [
 /**
  * Build a short, unique CSS selector for `el`.
  * Priority: #id → [name] → nth-of-type path (max 4 ancestors).
- * Used by executor.js findElement() to re-locate the element.
- *
- * @param {Element} el
- * @returns {string}
  */
 function buildSelector(el) {
-  // Prefer id — most reliable
   if (el.id) return `#${CSS.escape(el.id)}`;
 
-  // Prefer name attribute
   if (el.name) {
     const tag = el.tagName.toLowerCase();
     return `${tag}[name="${CSS.escape(el.name)}"]`;
   }
 
-  // Walk up ancestors building nth-of-type path (max 4 levels)
   const parts = [];
   let node = el;
   let depth = 0;
@@ -118,6 +134,7 @@ function buildSelector(el) {
 
 /**
  * Scan the entire document for visible, fillable fields.
+ * SmartFill's own UI elements are excluded via isSmartFillOwned().
  *
  * @param {string} [domain]  — defaults to window.location.hostname
  * @returns {FieldInfo[]}    — deduplicated by fingerprint
@@ -135,24 +152,26 @@ function buildSelector(el) {
 export function scanFields(domain) {
   const d = domain || window.location.hostname;
 
-  // Collect all candidate elements
   const candidates = [
     ...document.querySelectorAll(INPUT_SELECTOR),
     ...document.querySelectorAll(ROLE_SELECTOR),
   ];
 
-  const seen        = new Set();   // deduplicate by fingerprint
-  const fields      = [];
+  const seen   = new Set();
+  const fields = [];
 
   for (const el of candidates) {
     if (!isVisible(el)) continue;
 
     const { fingerprint, label, rawLabel, fieldType } = fingerprintField(el, d);
 
-    // Skip fields with no usable label (can't fingerprint them)
+    // Skip fields with no usable label
     if (!fingerprint) continue;
 
-    // Deduplicate — same fingerprint = same logical field
+    // ── Self-exclusion: skip SmartFill's own UI elements ──────────────
+    if (isSmartFillOwned(el, label)) continue;
+
+    // Deduplicate by fingerprint
     if (seen.has(fingerprint)) continue;
     seen.add(fingerprint);
 
@@ -162,8 +181,8 @@ export function scanFields(domain) {
       label,
       rawLabel,
       fieldType,
-      type:     fieldType,          // FIX Bug 1: alias so autofiller.js fieldInfo.type works
-      selector: buildSelector(el),  // FIX Bug 2: precomputed selector for executor.js
+      type:     fieldType,
+      selector: buildSelector(el),
     });
   }
 
@@ -176,23 +195,20 @@ export function scanFields(domain) {
  * Observe DOM mutations and re-scan when new nodes are added.
  * Calls callback(newFields) with any newly discovered fields.
  *
- * Used for SPA forms that render after page load.
- *
- * @param {Function} callback     — called with FieldInfo[]
+ * @param {Function} callback  — called with FieldInfo[]
  * @param {string}   [domain]
- * @returns {MutationObserver}    — call .disconnect() to stop
+ * @returns {MutationObserver} — call .disconnect() to stop
  */
 export function observeNewFields(callback, domain) {
   let debounceTimer = null;
   const knownFingerprints = new Set();
 
-  // Seed with already-known fields
   scanFields(domain).forEach(f => knownFingerprints.add(f.fingerprint));
 
   const observer = new MutationObserver(() => {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      const current = scanFields(domain);
+      const current   = scanFields(domain);
       const newFields = current.filter(f => !knownFingerprints.has(f.fingerprint));
       if (newFields.length > 0) {
         newFields.forEach(f => knownFingerprints.add(f.fingerprint));
