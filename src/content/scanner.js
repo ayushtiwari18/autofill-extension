@@ -1,6 +1,6 @@
 /**
- * scanner.js — SmartFill A6 (debug build)
- * Full lifecycle logging to diagnose Google Forms iframe issues.
+ * scanner.js — SmartFill A6 (debug + self-init)
+ * Full lifecycle logging. Calls initScanner() immediately on load.
  */
 
 import { scanFields, observeNewFields } from './fieldScanner.js';
@@ -21,7 +21,7 @@ function injectTooltipStyles() {
   console.log(`[SmartFill][${FRAME_TYPE}] tooltip.css injected`);
 }
 
-export function initScanner(domain) {
+function initScanner(domain) {
   const d = domain || window.location.hostname;
 
   console.log(`[SmartFill][${FRAME_TYPE}] ── initScanner START ── url: ${FRAME_URL}`);
@@ -38,7 +38,7 @@ export function initScanner(domain) {
       console.log(`[SmartFill][${FRAME_TYPE}]   field[${i}] label="${f.label}" type=${f.fieldType} el=${f.el.tagName}`)
     );
   } else {
-    console.warn(`[SmartFill][${FRAME_TYPE}] ⚠ No fields found on initial scan — will watch via MutationObserver`);
+    console.warn(`[SmartFill][${FRAME_TYPE}] ⚠ No fields on initial scan — MutationObserver will catch dynamic fields`);
   }
 
   attachAllRecorders(initial);
@@ -54,4 +54,13 @@ export function initScanner(domain) {
     attachAllRecorders(newFields);
     attachAllAutofillers(newFields);
   }, d);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// SELF-INIT — runs immediately when content.js is injected by Chrome
+// ─────────────────────────────────────────────────────────────────
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => initScanner());
+} else {
+  initScanner();
 }
