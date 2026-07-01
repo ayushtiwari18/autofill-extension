@@ -1,46 +1,35 @@
 /**
- * scanner.js — SmartFill content script entry point
- * ─────────────────────────────────────────────────────────
- * Injected into every page via manifest content_scripts.
- * Bundled by Webpack into dist/content.js.
- *
- * Responsibilities (Phase 1 + 2):
- *   1. Scan page for fillable fields (fieldScanner.js)
- *   2. Attach record-on-fill listeners (fillRecorder.js)     ← A4
- *   3. Attach autofill-on-focus from profile (autofiller.js) ← A5
- *   4. Watch for SPA navigation / late-rendered forms
+ * scanner.js — SmartFill A6 (updated)
+ * Wires scanFields + observeNewFields + attachAllAutofillers.
+ * Also injects tooltip.css once per page load.
  */
 
-import { scanFields, observeNewFields }  from './fieldScanner.js';
-import { attachAllRecorders }            from './fillRecorder.js';
-import { attachAllAutofillers }          from './autofiller.js';
+import { scanFields, observeNewFields } from './fieldScanner.js';
+import { attachAllRecorders }           from './recorder.js';
+import { attachAllAutofillers }         from './autofiller.js';
 
-const DOMAIN = window.location.hostname;
-
-// ───────────────────────────────────────────────────────────
-// INIT
-// ───────────────────────────────────────────────────────────
-
-function init() {
-  console.log(`[SmartFill] content script loaded on ${DOMAIN}`);
-
-  // Initial scan
-  const fields = scanFields(DOMAIN);
-  attachAllRecorders(fields, DOMAIN);
-  attachAllAutofillers(fields);            // A5
-
-  // Watch for SPA / lazy-rendered fields
-  observeNewFields((newFields) => {
-    attachAllRecorders(newFields, DOMAIN);
-    attachAllAutofillers(newFields);       // A5
-  }, DOMAIN);
-
-  console.log(`[SmartFill] init complete — watching ${fields.length} field(s)`);
+function injectTooltipStyles() {
+  if (document.getElementById('sf-tooltip-styles')) return;
+  const link = document.createElement('link');
+  link.id   = 'sf-tooltip-styles';
+  link.rel  = 'stylesheet';
+  link.href = chrome.runtime.getURL('src/content/tooltip.css');
+  (document.head || document.documentElement).appendChild(link);
 }
 
-// Run after DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
+export function initScanner(domain) {
+  const d = domain || window.location.hostname;
+
+  injectTooltipStyles();
+
+  const initial = scanFields(d);
+  attachAllRecorders(initial);
+  attachAllAutofillers(initial);
+
+  console.log(`[SmartFill] init complete — watching ${initial.length} field(s)`);
+
+  observeNewFields((newFields) => {
+    attachAllRecorders(newFields);
+    attachAllAutofillers(newFields);
+  }, d);
 }

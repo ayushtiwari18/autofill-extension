@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartFill A6 — Tooltip Test</title>
+<style>
+  body { font-family: sans-serif; max-width: 480px; margin: 60px auto; padding: 0 20px; }
+  h2   { color: #111; margin-bottom: 4px; }
+  p    { color: #6b7280; font-size: 13px; margin-bottom: 28px; }
+  .field-group { margin-bottom: 20px; }
+  label { display: block; font-size: 12px; font-weight: 600;
+          color: #374151; margin-bottom: 6px; text-transform: uppercase;
+          letter-spacing: 0.4px; }
+  input { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db;
+          border-radius: 6px; font-size: 14px; box-sizing: border-box;
+          outline: none; transition: border-color 0.15s; }
+  input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+  button { margin-top: 8px; padding: 6px 14px; font-size: 13px;
+           border: 1px solid #d1d5db; border-radius: 6px;
+           background: #f9fafb; cursor: pointer; }
+  #log  { margin-top: 32px; font-size: 12px; color: #374151;
+          background: #f9fafb; border-radius: 6px; padding: 12px;
+          min-height: 60px; white-space: pre-wrap; }
+</style>
+
+<!-- Inline tooltip styles (standalone — no extension needed) -->
+<style>
+.sf-tooltip {
+  position: fixed; z-index: 2147483647;
+  background: #fff; border: 1px solid #d1d5db;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  padding: 0; min-width: 160px; max-width: 320px;
+  font-family: -apple-system, sans-serif; font-size: 13px;
+  animation: sf-fade-in 0.12s ease; overflow: hidden;
+}
+@keyframes sf-fade-in {
+  from { opacity:0; transform:translateY(-4px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+.sf-tooltip-row {
+  display:flex; align-items:center; gap:8px;
+  padding:9px 12px; cursor:pointer; transition:background 0.1s;
+}
+.sf-tooltip-row:hover { background:#f0f9ff; }
+.sf-tooltip-icon  { font-size:14px; flex-shrink:0; opacity:0.75; }
+.sf-tooltip-label { color:#6b7280; font-size:10px; font-weight:600;
+                    letter-spacing:0.3px; text-transform:uppercase;
+                    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+                    max-width:80px; flex-shrink:0; }
+.sf-tooltip-value { color:#111827; font-weight:500;
+                    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; }
+.sf-tooltip-hint  { color:#9ca3af; font-size:10px; padding:4px 12px 6px;
+                    border-top:1px solid #f3f4f6; }
+</style>
+</head>
+<body>
+
+<h2>SmartFill A6 — Tooltip Test</h2>
+<p>No extension needed. Click any field — a suggestion tooltip should appear.</p>
+
+<div class="field-group">
+  <label>Full Name</label>
+  <input type="text" data-sf-label="full name" placeholder="Click me...">
+</div>
+<div class="field-group">
+  <label>Email Address</label>
+  <input type="email" data-sf-label="email" placeholder="Click me...">
+</div>
+<div class="field-group">
+  <label>Phone Number</label>
+  <input type="tel" data-sf-label="phone" placeholder="Click me...">
+</div>
+<div class="field-group">
+  <label>College</label>
+  <input type="text" data-sf-label="college" placeholder="Click me...">
+</div>
+<div class="field-group">
+  <label>LinkedIn</label>
+  <input type="url" data-sf-label="linkedin" placeholder="Click me...">
+</div>
+<div class="field-group">
+  <label>GitHub</label>
+  <input type="url" data-sf-label="github" placeholder="Click me...">
+</div>
+
+<button onclick="document.querySelectorAll('input').forEach(i=>i.value='')">Clear all fields</button>
+
+<div id="log">— events will appear here —</div>
+
+<script>
+const MOCK_PROFILE = {
+  full_name:  'Ayush Tiwari',
+  first_name: 'Ayush',
+  last_name:  'Tiwari',
+  email:      'ayushtiwari102003@gmail.com',
+  phone:      '+91-9XXXXXXXXX',
+  college:    'NIT Jamshedpur',
+  degree:     'B.Tech CSE',
+  grad_year:  '2025',
+  city:       'Jamshedpur',
+  state:      'Jharkhand',
+  country:    'India',
+  linkedin:   'https://linkedin.com/in/ayushtiwari18',
+  github:     'https://github.com/ayushtiwari18',
+  portfolio:  '',
+  skills:     'JavaScript, React, Node.js, Python',
+};
+
+const LABEL_MAP = [
+  { keys:['full name','your name','name'],        profile:'full_name'  },
+  { keys:['first name','given name'],             profile:'first_name' },
+  { keys:['last name','surname'],                 profile:'last_name'  },
+  { keys:['email','e-mail','email address'],      profile:'email'      },
+  { keys:['phone','mobile','contact number'],     profile:'phone'      },
+  { keys:['college','university','institution'],  profile:'college'    },
+  { keys:['linkedin','linkedin url'],             profile:'linkedin'   },
+  { keys:['github','github url'],                 profile:'github'     },
+  { keys:['skills','key skills'],                 profile:'skills'     },
+];
+
+function matchLabel(label) {
+  const norm = label.toLowerCase();
+  for (const e of LABEL_MAP) {
+    if (e.keys.some(k => norm.includes(k) || k.includes(norm))) return MOCK_PROFILE[e.profile];
+  }
+  return null;
+}
+
+let _tip = null;
+
+function showTooltip(el, label, value, onAccept) {
+  if (_tip) { _tip.remove(); _tip = null; }
+
+  const tip = document.createElement('div');
+  tip.className = 'sf-tooltip';
+
+  const row = document.createElement('div');
+  row.className = 'sf-tooltip-row';
+  row.innerHTML = `
+    <span class="sf-tooltip-icon">&#128161;</span>
+    <span class="sf-tooltip-label">${label}</span>
+    <span class="sf-tooltip-value">${value}</span>`;
+
+  const hint = document.createElement('div');
+  hint.className = 'sf-tooltip-hint';
+  hint.textContent = 'Click or ↵ to fill  ·  Esc to dismiss';
+
+  tip.append(row, hint);
+  document.body.appendChild(tip);
+  _tip = tip;
+
+  // Position
+  const rect = el.getBoundingClientRect();
+  tip.style.top  = (rect.bottom + 4) + 'px';
+  tip.style.left = rect.left + 'px';
+
+  row.onclick = () => { onAccept(value); tip.remove(); _tip = null; };
+
+  const dismiss = (e) => {
+    if (!tip.contains(e.target) && e.target !== el) { tip.remove(); _tip = null; document.removeEventListener('mousedown', dismiss, true); }
+  };
+  document.addEventListener('mousedown', dismiss, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { tip.remove(); _tip = null; } }, { once: true });
+}
+
+function log(msg) {
+  const el = document.getElementById('log');
+  const t  = new Date().toLocaleTimeString();
+  el.textContent += `\n${t}  ${msg}`;
+  if (el.textContent.startsWith('\n')) el.textContent = el.textContent.slice(1);
+}
+
+document.querySelectorAll('input[data-sf-label]').forEach(input => {
+  input.addEventListener('focus', () => {
+    if (input.value.trim()) return;
+    const lbl = input.dataset.sfLabel;
+    const val = matchLabel(lbl);
+    if (!val) return;
+    showTooltip(input, lbl, val, (accepted) => {
+      input.value = accepted;
+      log(`[FILL] "${lbl}" → "${accepted}"`);
+    });
+  });
+});
+</script>
+</body>
+</html>
