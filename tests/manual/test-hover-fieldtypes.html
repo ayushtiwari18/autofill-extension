@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>B2 — Hover Field Types Test</title>
+  <style>
+    /* Aggressive host CSS — used to prove Shadow DOM isolation */
+    * { font-family: 'Comic Sans MS', cursive !important; color: red !important;
+        background-color: #ffe0e0 !important; }
+    body { max-width: 700px; margin: 40px auto; padding: 20px; font-size: 14px; }
+    h1 { font-size: 20px; }
+    .field-group { margin: 18px 0; }
+    label { display: block; margin-bottom: 4px; font-weight: bold; }
+    input, textarea, select {
+      width: 100%; padding: 8px; border: 2px solid #ccc;
+      border-radius: 4px; font-size: 14px; margin-bottom: 4px;
+    }
+    .radio-group, .checkbox-group {
+      border: 2px dashed #aaa; padding: 10px; border-radius: 4px;
+    }
+    .checklist { margin-top: 30px; background: #f9f9f9 !important; padding: 16px; border-radius: 6px; }
+    .checklist li { margin: 6px 0; }
+    .checklist input[type=checkbox] { width: auto; margin-right: 6px; }
+    .note { font-size: 12px; color: #555 !important; margin-top: 8px; }
+    #log { background: #111 !important; color: #0f0 !important; font-family: monospace !important;
+           padding: 10px; border-radius: 4px; font-size: 12px; height: 120px;
+           overflow-y: auto; margin-top: 16px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+
+<h1>B2 — Hover Detection on All Field Types</h1>
+<p class="note">Hover each field and wait 300ms. The SmartFill tooltip should appear.<br>
+  The tooltip should have the correct font (NOT Comic Sans) — proving Shadow DOM isolation.</p>
+
+<!-- 1. Text input -->
+<div class="field-group">
+  <label>Full Name (text input)</label>
+  <input id="f-text" type="text" placeholder="Hover me for 300ms" data-sf-label="Full Name" data-sf-type="text" data-sf-value="Ayush Tiwari">
+</div>
+
+<!-- 2. Email input -->
+<div class="field-group">
+  <label>Email Address (email input)</label>
+  <input id="f-email" type="email" placeholder="Hover me" data-sf-label="Email Address" data-sf-type="email" data-sf-value="ayush@example.com">
+</div>
+
+<!-- 3. Tel input -->
+<div class="field-group">
+  <label>Phone Number (tel input)</label>
+  <input id="f-tel" type="tel" placeholder="Hover me" data-sf-label="Phone Number" data-sf-type="tel" data-sf-value="+91 98765 43210">
+</div>
+
+<!-- 4. Textarea -->
+<div class="field-group">
+  <label>Cover Letter (textarea)</label>
+  <textarea id="f-textarea" rows="3" placeholder="Hover me" data-sf-label="Cover Letter" data-sf-type="textarea" data-sf-value="I am excited to apply..."></textarea>
+</div>
+
+<!-- 5. Select dropdown -->
+<div class="field-group">
+  <label>Notice Period (select)</label>
+  <select id="f-select" data-sf-label="Notice Period" data-sf-type="select" data-sf-value="30 days">
+    <option value="">Select...</option>
+    <option value="immediately">Immediately</option>
+    <option value="15 days">15 days</option>
+    <option value="30 days">30 days</option>
+    <option value="60 days">60 days</option>
+    <option value="90 days">90 days</option>
+  </select>
+</div>
+
+<!-- 6. Simulated Google Forms radio group -->
+<div class="field-group">
+  <label>Availability (radio group — div[role=radiogroup])</label>
+  <div id="f-radio" role="radiogroup" aria-label="Availability"
+       data-sf-label="Availability" data-sf-type="radio" data-sf-value="Full-time"
+       style="cursor:pointer; padding:8px;">
+    <label><input type="radio" name="avail" value="Full-time"> Full-time</label><br>
+    <label><input type="radio" name="avail" value="Part-time"> Part-time</label><br>
+    <label><input type="radio" name="avail" value="Contract"> Contract</label>
+  </div>
+</div>
+
+<!-- 7. Simulated Google Forms checkbox group -->
+<div class="field-group">
+  <label>Skills (checkbox group — div[role=group])</label>
+  <div id="f-checkbox" role="group" aria-label="Skills"
+       data-sf-label="Skills" data-sf-type="checkbox" data-sf-value="JavaScript, Python"
+       style="cursor:pointer; padding:8px;">
+    <label><input type="checkbox" value="JavaScript"> JavaScript</label><br>
+    <label><input type="checkbox" value="Python"> Python</label><br>
+    <label><input type="checkbox" value="React"> React</label>
+  </div>
+</div>
+
+<div id="log">Hover log will appear here...
+</div>
+
+<div class="checklist">
+  <h3>B2 Test Checklist</h3>
+  <ul style="list-style:none; padding:0;">
+    <li><label><input type="checkbox"> 1. Hover text input 300ms → tooltip appears</label></li>
+    <li><label><input type="checkbox"> 2. Hover textarea → tooltip appears</label></li>
+    <li><label><input type="checkbox"> 3. Hover select dropdown → tooltip appears</label></li>
+    <li><label><input type="checkbox"> 4. Hover radio group div → tooltip appears</label></li>
+    <li><label><input type="checkbox"> 5. Moving mouse off field quickly (&lt;300ms) → tooltip does NOT appear</label></li>
+    <li><label><input type="checkbox"> 6. Moving mouse from field INTO tooltip → tooltip stays visible</label></li>
+    <li><label><input type="checkbox"> 7. ESC key closes tooltip</label></li>
+    <li><label><input type="checkbox"> 8. Tooltip font is NOT Comic Sans (Shadow DOM isolation ✅)</label></li>
+  </ul>
+</div>
+
+<script type="module">
+  /**
+   * Standalone test harness — does NOT import the extension modules.
+   * Instead it re-implements a minimal Shadow DOM tooltip inline so this
+   * file can be opened directly in a browser without a build step.
+   */
+
+  const log = document.getElementById('log');
+  function emit(msg) {
+    log.textContent += `\n${new Date().toLocaleTimeString()} ${msg}`;
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // ── Minimal Shadow DOM tooltip (mirrors real tooltip.js behaviour) ──
+  const host = document.createElement('div');
+  host.id = 'sf-test-host';
+  Object.assign(host.style, {
+    position: 'fixed', zIndex: '2147483647', pointerEvents: 'none',
+  });
+  const shadow = host.attachShadow({ mode: 'open' });
+  shadow.innerHTML = `
+    <style>
+      :host { all: initial; display: block; }
+      .tip {
+        pointer-events: auto;
+        background: #1e1e2e; color: #cdd6f4;
+        font-family: -apple-system, system-ui, sans-serif !important;
+        font-size: 13px; border-radius: 8px;
+        padding: 10px 14px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        min-width: 200px;
+        display: none;
+      }
+      .tip.show { display: block; }
+      .tip-label { color:#a6adc8; font-size:11px; text-transform:uppercase; margin-bottom:4px; }
+      .tip-value { font-size:14px; font-weight:600; }
+      .tip-hint  { font-size:10px; color:#585b70; margin-top:6px; }
+    </style>
+    <div class="tip" id="tip">
+      <div class="tip-label" id="tip-label"></div>
+      <div class="tip-value" id="tip-value"></div>
+      <div class="tip-hint">Click to fill · Esc to dismiss</div>
+    </div>
+  `;
+  document.body.appendChild(host);
+
+  let _hoverTimer = null;
+  let _currentEl  = null;
+
+  const tipEl    = shadow.getElementById('tip');
+  const tipLabel = shadow.getElementById('tip-label');
+  const tipValue = shadow.getElementById('tip-value');
+
+  function showTip(el) {
+    const rect  = el.getBoundingClientRect();
+    const label = el.dataset.sfLabel || el.getAttribute('aria-label') || 'Field';
+    const value = el.dataset.sfValue || '(no value)';
+
+    tipLabel.textContent = label;
+    tipValue.textContent = value;
+    host.style.top  = `${rect.bottom + 4}px`;
+    host.style.left = `${rect.left}px`;
+    tipEl.classList.add('show');
+    emit(`✅ Tooltip shown for "${label}" → "${value}"`);
+
+    tipEl.onclick = () => {
+      if (el.tagName === 'SELECT') {
+        const opt = Array.from(el.options).find(o => o.value === value || o.text === value);
+        if (opt) { el.value = opt.value; el.dispatchEvent(new Event('change', {bubbles:true})); }
+      } else if (el.tagName !== 'DIV') {
+        el.value = value;
+        el.dispatchEvent(new InputEvent('input', {bubbles:true}));
+        el.dispatchEvent(new Event('change', {bubbles:true}));
+      }
+      hideTip();
+      emit(`✅ Filled "${label}" = "${value}"`);
+    };
+  }
+
+  function hideTip() {
+    tipEl.classList.remove('show');
+    _currentEl = null;
+  }
+
+  // ESC key closes tooltip
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && tipEl.classList.contains('show')) {
+      hideTip();
+      emit('⌨️  ESC → tooltip dismissed');
+    }
+  });
+
+  // Attach to all fields + role=radiogroup + role=group
+  const fields = document.querySelectorAll(
+    'input[data-sf-label], textarea[data-sf-label], select[data-sf-label], [role=radiogroup], [role=group]'
+  );
+
+  fields.forEach(el => {
+    const label = el.dataset.sfLabel || el.getAttribute('aria-label') || '?';
+
+    el.addEventListener('mouseenter', () => {
+      emit(`🖱  mouseenter → "${label}"`);
+      clearTimeout(_hoverTimer);
+      _hoverTimer = setTimeout(() => {
+        _currentEl = el;
+        showTip(el);
+      }, 300);
+    });
+
+    el.addEventListener('mouseleave', () => {
+      clearTimeout(_hoverTimer);
+      setTimeout(() => {
+        if (!tipEl.matches(':hover') && !el.matches(':hover')) {
+          hideTip();
+        }
+      }, 200);
+    });
+  });
+
+  emit(`🔌 Wired ${fields.length} fields. Hover each for 300ms.`);
+</script>
+</body>
+</html>

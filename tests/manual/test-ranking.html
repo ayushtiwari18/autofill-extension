@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>C2 — Ranking Engine Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 700px; margin: 40px auto; padding: 20px; }
+    h1 { font-size: 20px; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+    th { background: #2d2d3a; color: #cdd6f4; text-align: left; padding: 8px 10px; }
+    td { padding: 7px 10px; border-bottom: 1px solid #eee; }
+    tr:nth-child(even) td { background: #f9f9fb; }
+    .rank-1 td:first-child { font-weight: bold; color: #16a34a; }
+    .rank-2 td:first-child { font-weight: bold; color: #2563eb; }
+    .rank-3 td:first-child { color: #dc2626; }
+    .checklist { margin-top: 30px; background: #f9f9f9; padding: 16px; border-radius: 6px; }
+    .checklist li { margin: 6px 0; }
+    button { padding: 8px 18px; background: #1e1e2e; color: #cdd6f4;
+             border: none; border-radius: 6px; cursor: pointer; font-size: 13px; margin: 4px; }
+    button:hover { background: #2d2d3e; }
+    #result { margin-top: 16px; }
+    .pass { color: #16a34a; font-weight: bold; }
+    .fail { color: #dc2626; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+<h1>C2 — Ranking Engine: Frequency × Recency Decay</h1>
+<p>Pure JS test — no extension, no IDB needed. Opens directly in any browser.</p>
+
+<h3>Seed Data</h3>
+<table>
+  <thead><tr><th>Value</th><th>usedCount</th><th>lastUsed</th></tr></thead>
+  <tbody>
+    <tr><td>Ayush Tiwari</td><td>10</td><td>7 days ago</td></tr>
+    <tr><td>Ayush K. Tiwari</td><td>3</td><td>today (0 days ago)</td></tr>
+    <tr><td>A. Tiwari</td><td>1</td><td>60 days ago</td></tr>
+  </tbody>
+</table>
+
+<button onclick="runTest1()">▶ Run Test 1 — Normal ranking</button>
+<button onclick="runTest2()">▶ Run Test 2 — Age "Ayush K.T." by 90 days → drops to #3</button>
+<button onclick="runAll()">▶ Run All Tests</button>
+
+<div id="result"></div>
+
+<div class="checklist">
+  <h3>C2 Test Checklist</h3>
+  <ul style="list-style:none; padding:0;">
+    <li><label><input type="checkbox"> 1. "Ayush Tiwari" ranks #1 (high count, recent)</label></li>
+    <li><label><input type="checkbox"> 2. "Ayush K. Tiwari" ranks #2 (lower count but very recent)</label></li>
+    <li><label><input type="checkbox"> 3. "A. Tiwari" ranks #3 (old + low count)</label></li>
+    <li><label><input type="checkbox"> 4. Change lastUsed of "Ayush K.T." to 90 days ago → drops to #3</label></li>
+  </ul>
+</div>
+
+<script type="module">
+  // ── Inline ranker logic (mirrors src/engine/ranker.js exactly) ──────
+  const DECAY_DAYS = 30;
+
+  function scoreEntry(entry) {
+    const count = typeof entry.usedCount === 'number' ? entry.usedCount : 0;
+    if (count === 0) return 0;
+    const lastUsedMs = entry.lastUsed ?? (Date.now() - 365 * 86_400_000);
+    const daysSince  = (Date.now() - lastUsedMs) / 86_400_000;
+    const recency    = Math.exp(-Math.max(0, daysSince) / DECAY_DAYS);
+    return count * recency;
+  }
+
+  function rankSuggestions(entries) {
+    return entries
+      .map(e => ({ ...e, score: scoreEntry(e) }))
+      .sort((a, b) => b.score - a.score);
+  }
+
+  // ── Helper ─────────────────────────────────────────────────────────
+  const daysAgo = d => Date.now() - d * 86_400_000;
+
+  function renderTable(ranked) {
+    const rows = ranked.map((e, i) => `
+      <tr class="rank-${i+1}">
+        <td>#${i+1}</td>
+        <td>${e.value}</td>
+        <td>${e.usedCount}</td>
+        <td>${e.score.toFixed(4)}</td>
+      </tr>`).join('');
+    return `<table>
+      <thead><tr><th>Rank</th><th>Value</th><th>usedCount</th><th>Score</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  function assert(condition, label) {
+    return `<div class="${condition ? 'pass' : 'fail'}">${condition ? '✅' : '❌'} ${label}</div>`;
+  }
+
+  // ── Tests ──────────────────────────────────────────────────────────
+  window.runTest1 = function() {
+    const entries = [
+      { value: 'Ayush Tiwari',    usedCount: 10, lastUsed: daysAgo(7) },
+      { value: 'Ayush K. Tiwari', usedCount: 3,  lastUsed: daysAgo(0) },
+      { value: 'A. Tiwari',       usedCount: 1,  lastUsed: daysAgo(60) },
+    ];
+    const ranked = rankSuggestions(entries);
+    const output = [
+      '<h3>Test 1 — Normal ranking</h3>',
+      renderTable(ranked),
+      assert(ranked[0].value === 'Ayush Tiwari',    'Check 1: "Ayush Tiwari" is #1'),
+      assert(ranked[1].value === 'Ayush K. Tiwari', 'Check 2: "Ayush K. Tiwari" is #2'),
+      assert(ranked[2].value === 'A. Tiwari',        'Check 3: "A. Tiwari" is #3'),
+    ].join('');
+    document.getElementById('result').innerHTML = output;
+  };
+
+  window.runTest2 = function() {
+    // Age "Ayush K. Tiwari" to 90 days ago → should drop to last
+    const entries = [
+      { value: 'Ayush Tiwari',    usedCount: 10, lastUsed: daysAgo(7) },
+      { value: 'Ayush K. Tiwari', usedCount: 3,  lastUsed: daysAgo(90) },  // aged
+      { value: 'A. Tiwari',       usedCount: 1,  lastUsed: daysAgo(60) },
+    ];
+    const ranked = rankSuggestions(entries);
+    const output = [
+      '<h3>Test 2 — "Ayush K. Tiwari" aged to 90 days</h3>',
+      renderTable(ranked),
+      assert(ranked[0].value === 'Ayush Tiwari',    'Check 1: "Ayush Tiwari" still #1'),
+      assert(ranked[2].value === 'Ayush K. Tiwari', 'Check 4: "Ayush K. Tiwari" drops to #3'),
+    ].join('');
+    document.getElementById('result').innerHTML = output;
+  };
+
+  window.runAll = function() {
+    window.runTest1();
+    setTimeout(() => {
+      const t1 = document.getElementById('result').innerHTML;
+      window.runTest2();
+      const t2 = document.getElementById('result').innerHTML;
+      document.getElementById('result').innerHTML = t1 + '<hr>' + t2;
+    }, 50);
+  };
+
+  // Auto-run on load
+  window.runAll();
+</script>
+</body>
+</html>
