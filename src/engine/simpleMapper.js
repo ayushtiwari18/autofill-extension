@@ -1,7 +1,11 @@
 /**
  * Simple Mapper — flat keyword match
- * Checks if label / name / placeholder / ariaLabel / id contains a keyword.
- * To add a new field: add one object to RULES. That's it.
+ * Each RULE: { profilePath, keywords[], negative[], getValue(profile) }
+ * A field matches if ANY source (label/name/placeholder/ariaLabel/id)
+ * CONTAINS a keyword AND NONE of the negative keywords appear in that
+ * same source.
+ *
+ * ADDING A NEW FIELD: just append one object to RULES below.
  */
 
 function get(profile, ...keys) {
@@ -15,196 +19,254 @@ function get(profile, ...keys) {
   return String(v);
 }
 
+// ──────────────────────────────────────────────────────────────────────
 const RULES = [
-  // ─ Personal ────────────────────────────────────────────────────────
+
+  // ─ FULL NAME (must come BEFORE firstName/lastName rules) ────────────
+  // When label is "Full Name", fill firstName + space + lastName
+  {
+    profilePath: 'profile.personal.fullName',
+    keywords: ['full name', 'fullname', 'your name', 'candidate name', 'applicant name', 'complete name'],
+    negative: ['first', 'last', 'middle'],
+    getValue: p => [get(p, 'personal', 'firstName'), get(p, 'personal', 'lastName')].filter(Boolean).join(' ')
+  },
+
+  // ─ First Name ────────────────────────────────────────────────────
   {
     profilePath: 'profile.personal.firstName',
-    keywords: ['first name', 'firstname', 'fname', 'given name', 'first'],
-    // Negative: must NOT also contain 'last' (avoids matching "first and last name")
-    negative: ['last'],
+    keywords: ['first name', 'firstname', 'fname', 'given name'],
+    negative: ['last', 'full', 'middle'],
     getValue: p => get(p, 'personal', 'firstName')
   },
+
+  // ─ Last / Family Name ────────────────────────────────────────────
   {
     profilePath: 'profile.personal.lastName',
-    keywords: ['last name', 'lastname', 'lname', 'surname', 'family name', 'last'],
-    negative: [],
+    keywords: ['last name', 'lastname', 'lname', 'surname', 'family name'],
+    negative: ['first', 'full', 'middle'],
     getValue: p => get(p, 'personal', 'lastName')
   },
+
+  // ─ Email ─────────────────────────────────────────────────────────
   {
     profilePath: 'profile.personal.email',
-    keywords: ['email', 'e-mail', 'mail'],
+    keywords: ['email', 'e-mail', 'mail', 'email address', 'email id'],
     negative: [],
     getValue: p => get(p, 'personal', 'email')
   },
+
+  // ─ Phone / Contact Number ──────────────────────────────────────
   {
     profilePath: 'profile.personal.phone',
-    keywords: ['phone', 'mobile', 'telephone', 'cell', 'contact number', 'phone number'],
-    negative: [],
+    keywords: ['phone', 'mobile', 'telephone', 'cell', 'contact number', 'phone number', 'mobile number', 'contact no', 'whatsapp'],
+    negative: ['email'],
     getValue: p => get(p, 'personal', 'phone')
   },
+
+  // ─ Job Position / Role (must come BEFORE generic 'role'/'title') ───
+  {
+    profilePath: 'profile.experience.currentRole',
+    keywords: ['job position', 'position applied', 'applying for', 'apply for', 'job title', 'current role', 'designation', 'job role', 'role', 'title', 'position'],
+    negative: ['company', 'employer', 'organization', 'school', 'college'],
+    getValue: p => get(p, 'experience', 'currentRole')
+  },
+
+  // ─ Address ───────────────────────────────────────────────────
   {
     profilePath: 'profile.personal.address',
-    keywords: ['address', 'street'],
-    negative: ['email'],
+    keywords: ['address', 'street', 'current address', 'residential'],
+    negative: ['email', 'web', 'url'],
     getValue: p => get(p, 'personal', 'address')
   },
+
+  // ─ City ──────────────────────────────────────────────────────────
   {
     profilePath: 'profile.personal.city',
-    keywords: ['city', 'town'],
+    keywords: ['city', 'town', 'current city', 'home city'],
     negative: [],
     getValue: p => get(p, 'personal', 'city')
   },
+
+  // ─ State ─────────────────────────────────────────────────────────
   {
     profilePath: 'profile.personal.state',
     keywords: ['state', 'province', 'region'],
     negative: [],
     getValue: p => get(p, 'personal', 'state')
   },
+
+  // ─ ZIP / Postal ───────────────────────────────────────────────
   {
     profilePath: 'profile.personal.zipCode',
-    keywords: ['zip', 'postal', 'postcode', 'zip code', 'postal code'],
+    keywords: ['zip', 'postal', 'postcode', 'pin code', 'pincode'],
     negative: [],
     getValue: p => get(p, 'personal', 'zipCode')
   },
+
+  // ─ Country ────────────────────────────────────────────────────
   {
     profilePath: 'profile.personal.country',
     keywords: ['country', 'nation'],
     negative: [],
     getValue: p => get(p, 'personal', 'country')
   },
-  // ─ Links ──────────────────────────────────────────────────────────
+
+  // ─ LinkedIn ──────────────────────────────────────────────────
   {
     profilePath: 'profile.links.linkedin',
-    keywords: ['linkedin'],
+    keywords: ['linkedin', 'linked in'],
     negative: [],
     getValue: p => get(p, 'links', 'linkedin')
   },
+
+  // ─ GitHub ─────────────────────────────────────────────────────
   {
     profilePath: 'profile.links.github',
-    keywords: ['github'],
+    keywords: ['github', 'git hub'],
     negative: [],
     getValue: p => get(p, 'links', 'github')
   },
+
+  // ─ Portfolio ─────────────────────────────────────────────────
   {
     profilePath: 'profile.links.portfolio',
     keywords: ['portfolio'],
     negative: [],
     getValue: p => get(p, 'links', 'portfolio')
   },
+
+  // ─ Website ──────────────────────────────────────────────────
   {
     profilePath: 'profile.links.website',
     keywords: ['website', 'web page', 'personal site', 'homepage'],
     negative: ['linkedin', 'github', 'portfolio'],
     getValue: p => get(p, 'links', 'website')
   },
-  // ─ Education ──────────────────────────────────────────────────
+
+  // ─ University ───────────────────────────────────────────────
   {
     profilePath: 'profile.education.university',
-    keywords: ['university', 'college', 'school', 'institution', 'alma mater'],
+    keywords: ['university', 'college', 'institution', 'alma mater', 'school name'],
     negative: [],
     getValue: p => get(p, 'education', 'university')
   },
+
+  // ─ Degree ────────────────────────────────────────────────────
   {
     profilePath: 'profile.education.degree',
-    keywords: ['degree', 'qualification', 'education level'],
+    keywords: ['degree', 'qualification', 'highest education', 'education level'],
     negative: [],
     getValue: p => get(p, 'education', 'degree')
   },
+
+  // ─ Major / Field of Study ─────────────────────────────────────
   {
     profilePath: 'profile.education.major',
-    keywords: ['major', 'field of study', 'specialization', 'subject'],
+    keywords: ['major', 'field of study', 'specialization', 'branch', 'stream'],
     negative: [],
     getValue: p => get(p, 'education', 'major')
   },
+
+  // ─ Graduation Year ──────────────────────────────────────────
   {
     profilePath: 'profile.education.graduationYear',
-    keywords: ['graduation year', 'grad year', 'year of graduation'],
+    keywords: ['graduation year', 'grad year', 'passing year', 'year of passing', 'pass out year'],
     negative: [],
     getValue: p => get(p, 'education', 'graduationYear')
   },
+
+  // ─ GPA ───────────────────────────────────────────────────────
   {
     profilePath: 'profile.education.gpa',
-    keywords: ['gpa', 'grade point', 'cgpa', 'grades'],
+    keywords: ['gpa', 'cgpa', 'grade point', 'percentage', 'marks', 'score'],
     negative: [],
     getValue: p => get(p, 'education', 'gpa')
   },
-  // ─ Experience ────────────────────────────────────────────────
-  {
-    profilePath: 'profile.experience.currentRole',
-    keywords: ['current role', 'job title', 'position', 'designation', 'role', 'title'],
-    negative: ['company', 'employer'],
-    getValue: p => get(p, 'experience', 'currentRole')
-  },
+
+  // ─ Current Company ─────────────────────────────────────────
   {
     profilePath: 'profile.experience.currentCompany',
-    keywords: ['company', 'employer', 'organization', 'current company', 'current employer'],
+    keywords: ['company', 'employer', 'organization', 'current company', 'current employer', 'where do you work'],
     negative: [],
     getValue: p => get(p, 'experience', 'currentCompany')
   },
+
+  // ─ Years of Experience ─────────────────────────────────────
   {
     profilePath: 'profile.experience.yearsOfExperience',
-    keywords: ['years of experience', 'experience', 'years experience', 'work experience'],
+    keywords: ['years of experience', 'work experience', 'total experience', 'experience in years', 'how many years'],
     negative: [],
     getValue: p => get(p, 'experience', 'yearsOfExperience')
   },
+
+  // ─ Skills ─────────────────────────────────────────────────────
   {
     profilePath: 'profile.experience.skills',
-    keywords: ['skill', 'expertise', 'competencies', 'technical skills', 'abilities'],
+    keywords: ['skill', 'expertise', 'competencies', 'technical skills', 'technologies', 'tools', 'key skills'],
     negative: [],
     getValue: p => get(p, 'experience', 'skills')
   }
 ];
 
+// ─────────────────────────────────────────────────────────────────────
 function norm(str) {
   return (str || '').toLowerCase().trim();
 }
 
 function getSources(field) {
-  return [
+  // Only non-empty, de-duped sources
+  const raw = [
     norm(field.label),
-    norm(field.name),
-    norm(field.placeholder),
     norm(field.ariaLabel),
-    norm(field.id)
-  ].filter(Boolean);
+    norm(field.placeholder),
+    // name/id often garbage on Google Forms — only use if no label exists
+    ...((!field.label && !field.ariaLabel) ? [norm(field.name), norm(field.id)] : [])
+  ];
+  return [...new Set(raw.filter(Boolean))];
+}
+
+function sourceMatchesKeyword(src, kw) {
+  return src.includes(kw);
+}
+
+function sourceHasNegative(src, negatives) {
+  return negatives.some(neg => src.includes(norm(neg)));
 }
 
 function matchField(field, innerProfile) {
   const sources = getSources(field);
-  const combined = sources.join(' ');
-  console.log(`[SimpleMapper] Field "${field.label || field.name || field.id}" sources:`, sources);
+  console.log(`[SimpleMapper] Field "${field.label || field.ariaLabel || field.name || field.id}" sources:`, sources);
 
   for (const rule of RULES) {
-    // Check negative keywords first
-    const hasNegative = rule.negative.some(neg => combined.includes(norm(neg)));
-    if (hasNegative) continue;
+    for (const src of sources) {
+      // Skip if this source contains a negative keyword
+      if (sourceHasNegative(src, rule.negative)) continue;
 
-    // Check positive keywords against each source
-    for (const kw of rule.keywords) {
-      const kwNorm = norm(kw);
-      if (sources.some(src => src.includes(kwNorm))) {
-        const value = rule.getValue(innerProfile);
-        console.log(`  ✅ Keyword "${kw}" matched → ${rule.profilePath} = "${value}"`);
-        if (!value) {
-          console.warn(`  ⚠️ Profile value empty for ${rule.profilePath} — skipping`);
-          return null;
+      for (const kw of rule.keywords) {
+        if (sourceMatchesKeyword(src, norm(kw))) {
+          const value = rule.getValue(innerProfile);
+          console.log(`  ✅ Keyword "${kw}" in src "${src}" → ${rule.profilePath} = "${value}"`);
+          if (!value) {
+            console.warn(`  ⚠️ Profile value empty for ${rule.profilePath} — skipping`);
+            break; // try next rule
+          }
+          return {
+            formFieldId:       field.id,
+            formFieldSelector: field.selector,
+            formFieldLabel:    field.label || field.ariaLabel || field.placeholder || field.name,
+            formFieldType:     field.type,
+            profilePath:       rule.profilePath,
+            profileValue:      value,
+            confidence:        0.95,
+            matchedOn:         `${rule.profilePath} via "${kw}"`,
+            requiresReview:    false
+          };
         }
-        return {
-          formFieldId: field.id,
-          formFieldSelector: field.selector,
-          formFieldLabel: field.label || field.ariaLabel || field.placeholder || field.name,
-          formFieldType: field.type,
-          profilePath: rule.profilePath,
-          profileValue: value,
-          confidence: 0.95,
-          matchedOn: 'keyword',
-          requiresReview: false
-        };
       }
     }
   }
 
-  console.log(`  ❌ No keyword matched for "${field.label || field.name || field.id}"`);
+  console.log(`  ❌ No keyword matched for "${field.label || field.ariaLabel || field.name || field.id}"`);
   return null;
 }
 
