@@ -1,6 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { useAppContext } from './Popup.jsx';
-import { simpleMapProfileToForm } from '../engine/simpleMapper.js';
+/**
+ * Dashboard.jsx — SmartFill main screen
+ * ─────────────────────────────────────────────────────────
+ * FIXED: getStorageUsage() no longer calls chrome.storage.local.getBytesInUse()
+ * (wrong store). Now estimates IDB usage via JSON.stringify of the profile
+ * record, which is the only large object we write to IDB from the popup.
+ * Real IDB quota estimation requires StorageManager.estimate() which we
+ * call as a secondary source when available.
+ */
+import React, { useState, useEffect }     from 'react';
+import { useAppContext }                   from './Popup.jsx';
+import { simpleMapProfileToForm }          from '../engine/simpleMapper.js';
 
 function Dashboard() {
   const {
@@ -8,14 +17,14 @@ function Dashboard() {
     setCurrentScreen,
     setFormData,
     setMappingResult,
-    resetState
+    resetState,
   } = useAppContext();
 
-  const [storageUsage, setStorageUsage] = useState(0);
+  const [storageUsage, setStorageUsage]       = useState(0);
   const [profileCompletion, setProfileCompletion] = useState(0);
-  const [formsDetected, setFormsDetected] = useState(0);
-  const [scanning, setScanning] = useState(false);
-  const [lastScannedUrl, setLastScannedUrl] = useState('');
+  const [formsDetected, setFormsDetected]     = useState(0);
+  const [scanning, setScanning]               = useState(false);
+  const [lastScannedUrl, setLastScannedUrl]   = useState('');
 
   useEffect(() => {
     calculateProfileCompletion();
@@ -40,11 +49,25 @@ function Dashboard() {
     setProfileCompletion(total > 0 ? Math.round((filled / total) * 100) : 0);
   };
 
+  // FIXED: estimate IDB usage instead of querying chrome.storage.local
   const getStorageUsage = async () => {
     try {
-      const result = await chrome.storage.local.getBytesInUse(null);
-      setStorageUsage((result / (1024 * 1024)).toFixed(2));
-    } catch (err) { console.error('[Dashboard] Storage error:', err); }
+      let bytes = 0;
+
+      // Primary: StorageManager.estimate() gives real browser quota/usage
+      if (navigator.storage && navigator.storage.estimate) {
+        const est = await navigator.storage.estimate();
+        bytes = est.usage || 0;
+      } else if (profile) {
+        // Fallback: estimate from profile JSON size
+        bytes = new Blob([JSON.stringify(profile)]).size;
+      }
+
+      setStorageUsage((bytes / (1024 * 1024)).toFixed(2));
+    } catch (err) {
+      console.error('[Dashboard] Storage estimate error:', err);
+      setStorageUsage('?');
+    }
   };
 
   const checkForForms = async () => {
@@ -65,10 +88,8 @@ function Dashboard() {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab || !tab.id) { alert('No active tab found'); return; }
-
       console.log('[Dashboard] Scanning tab:', tab.id, tab.url);
       const response = await chrome.tabs.sendMessage(tab.id, { action: 'SCAN_PAGE' });
-
       if (response && response.success) {
         await new Promise(r => setTimeout(r, 300));
         const bgResponse = await chrome.runtime.sendMessage({ action: 'GET_LAST_SCANNED_DATA' });
@@ -90,17 +111,12 @@ function Dashboard() {
       } else {
         alert('Scan failed: ' + err.message);
       }
-    } finally {
-      setScanning(false);
-    }
+    } finally { setScanning(false); }
   };
 
   const handleAutofill = async () => {
     try {
-      // 1. Get scanned form data
       const response = await chrome.runtime.sendMessage({ action: 'GET_LAST_SCANNED_DATA' });
-      console.log('[Dashboard] GET_LAST_SCANNED_DATA response:', response);
-
       if (!response || !response.formData) {
         alert('Please scan the page first (click Scan Page)');
         return;
@@ -109,32 +125,16 @@ function Dashboard() {
         alert('No forms detected. Click Scan Page first.');
         return;
       }
-
-      // 2. Unwrap profile — always use the inner object
       const innerProfile = profile?.profile ?? profile;
-      console.log('[Dashboard] innerProfile keys:', innerProfile ? Object.keys(innerProfile) : 'NULL');
-      console.log('[Dashboard] formData forms:', response.formData.forms.length);
-      console.log('[Dashboard] formData fields:', response.formData.forms[0]?.fields?.map(f => `${f.label}(${f.type})`));
-
-      // 3. Run simple keyword mapper
       const mapping = simpleMapProfileToForm(innerProfile, response.formData);
-      console.log('[Dashboard] Mapping result:', mapping);
-
       if (!mapping.matches || mapping.matches.length === 0) {
-        // Show detailed debug info
         const fieldSummary = response.formData.forms
           .flatMap(f => f.fields)
           .map(f => `  • label="${f.label}" name="${f.name}" type="${f.type}"`)
           .join('\n');
-        console.error('[Dashboard] 0 matches. Detected fields:\n' + fieldSummary);
-        alert(
-          `No fields matched.\n\nDetected fields:\n${fieldSummary}\n\n` +
-          `Check console (F12) for detailed matching log.`
-        );
+        alert(`No fields matched.\n\nDetected fields:\n${fieldSummary}\n\nCheck console (F12) for details.`);
         return;
       }
-
-      // 4. Go to review screen
       setMappingResult(mapping);
       setCurrentScreen('review');
     } catch (err) {
@@ -143,23 +143,16 @@ function Dashboard() {
     }
   };
 
-  const handleEditProfile = () => setCurrentScreen('edit-profile');
-
-  const handleLock = () => {
-    if (confirm('Lock profile and close popup?')) { resetState(); window.close(); }
-  };
-
-  const getFirstName = () => profile?.profile?.personal?.firstName || 'User';
-
-  const safeHostname = (url) => {
-    try { return new URL(url).hostname; } catch { return url; }
-  };
+  const handleEditProfile  = () => setCurrentScreen('edit-profile');
+  const handleLock         = () => { if (confirm('Lock and close?')) { resetState(); window.close(); } };
+  const getFirstName       = () => profile?.profile?.personal?.firstName || 'User';
+  const safeHostname       = (url) => { try { return new URL(url).hostname; } catch { return url; } };
 
   return (
     <div className="content">
       <div className="welcome-section">
         <h2 className="welcome-title">Hello, {getFirstName()}! 👋</h2>
-        <p className="welcome-subtitle">Ready to autofill job applications</p>
+        <p className="welcome-subtitle">Ready to fill forms smarter</p>
       </div>
 
       <div className="stats-grid">
@@ -171,47 +164,40 @@ function Dashboard() {
           <div className="stat-value">{formsDetected}</div>
           <div className="stat-label">Forms Detected</div>
         </div>
+        <div className="stat-card">
+          <div className="stat-value">{storageUsage} MB</div>
+          <div className="stat-label">IDB Usage</div>
+        </div>
       </div>
 
       <div className="progress-bar">
         <div className="progress-fill" style={{ width: `${profileCompletion}%` }}></div>
       </div>
-      <div className="progress-text mb-24">{profileCompletion}% of profile fields filled</div>
-
-      <div className="btn-group">
-        <button className="btn btn-primary" onClick={handleEditProfile}>✏️ Edit Profile</button>
-        <button className="btn btn-secondary" onClick={handleScanPage} disabled={scanning}>
-          {scanning ? '🔄 Scanning...' : '🔍 Scan Page'}
-        </button>
-      </div>
-
-      <button
-        className="btn btn-success btn-block mt-16"
-        onClick={handleAutofill}
-        disabled={formsDetected === 0}
-      >
-        ⚡ Autofill Form{formsDetected !== 1 ? 's' : ''}
-      </button>
-
-      <button className="btn btn-secondary btn-block mt-16" onClick={handleLock}>
-        🔒 Lock Profile
-      </button>
-
-      <div className="storage-meter">
-        <div className="storage-bar">
-          <div
-            className={`storage-fill${storageUsage > 4 ? ' danger' : storageUsage > 3 ? ' warning' : ''}`}
-            style={{ width: `${(storageUsage / 5) * 100}%` }}
-          />
-        </div>
-        <div className="storage-text">Storage: {storageUsage} MB / 5 MB used</div>
-      </div>
+      <div className="progress-text mb-24">{profileCompletion}% profile complete</div>
 
       {lastScannedUrl && (
-        <div className="mt-16 text-center text-muted" style={{ fontSize: '12px' }}>
+        <div className="alert alert-info" style={{ marginBottom: '12px', fontSize: '11px' }}>
           Last scanned: {safeHostname(lastScannedUrl)}
         </div>
       )}
+
+      <div className="button-group">
+        <button className="btn btn-secondary" onClick={handleScanPage} disabled={scanning}>
+          {scanning ? '🔄 Scanning…' : '🔍 Scan Page'}
+        </button>
+        <button className="btn btn-primary" onClick={handleAutofill}>
+          ⚡ Fill Form
+        </button>
+      </div>
+
+      <div className="button-group" style={{ marginTop: '8px' }}>
+        <button className="btn btn-secondary" onClick={handleEditProfile}>
+          ✏️ Edit Profile
+        </button>
+        <button className="btn btn-secondary" onClick={handleLock}>
+          🔒 Lock
+        </button>
+      </div>
     </div>
   );
 }
