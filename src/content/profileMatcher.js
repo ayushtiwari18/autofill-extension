@@ -2,7 +2,7 @@
  * profileMatcher.js — SmartFill A5 (patched)
  * Maps field fingerprint label → profile key → value.
  *
- * Profile stored in chrome.storage.sync under key "smartfill_profile".
+ * Profile stored in chrome.storage.local under key "profile".
  */
 
 const LABEL_MAP = [
@@ -41,8 +41,8 @@ export function labelToProfileKey(label) {
 export async function loadProfile() {
   return new Promise((resolve) => {
     try {
-      chrome.storage.sync.get('smartfill_profile', (result) => {
-        const p = result.smartfill_profile || {};
+      chrome.storage.local.get('profile', (result) => {
+        const p = result.profile || {};
         const keys = Object.keys(p);
         if (keys.length > 0) {
           console.log(`[Profile] loaded ${keys.length} key(s) from storage`);
