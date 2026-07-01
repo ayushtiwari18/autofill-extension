@@ -1,5 +1,5 @@
 /**
- * autofiller.js — SmartFill A6 (debug build)
+ * autofiller.js — SmartFill A6 (patched)
  * Full lifecycle logging for focus → match → tooltip → fill.
  */
 
@@ -98,8 +98,10 @@ export function attachAutofiller(fieldInfo) {
     }
   });
 
+  // Increased to 300ms so tooltip click can register before hide fires.
+  // tooltip.js also sets _pendingHide = false on mousedown to cancel the timer.
   el.addEventListener('blur', () => {
-    setTimeout(() => hideTooltip(), 150);
+    setTimeout(() => hideTooltip(), 300);
   });
 }
 

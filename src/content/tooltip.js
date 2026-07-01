@@ -1,5 +1,5 @@
 /**
- * tooltip.js — SmartFill A6
+ * tooltip.js — SmartFill A6 (patched)
  * Renders a suggestion chip below a focused field.
  *
  * Usage:
@@ -8,6 +8,7 @@
  */
 
 let _current = null;  // { el, tooltipEl, cleanup }
+let _hideTimer = null;
 
 /**
  * Show a suggestion tooltip below `el`.
@@ -61,6 +62,15 @@ export function showTooltip(el, suggestion, onAccept) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); accept(); }
   });
 
+  // Cancel the blur-triggered hide timer when user mousedowns inside tooltip
+  tip.addEventListener('mousedown', (e) => {
+    e.preventDefault();   // prevents input from losing focus prematurely
+    if (_hideTimer) {
+      clearTimeout(_hideTimer);
+      _hideTimer = null;
+    }
+  });
+
   // — Dismiss on Esc or outside click
   const onKeyDown = (e) => { if (e.key === 'Escape') hideTooltip(); };
   const onOutside = (e) => {
@@ -88,6 +98,14 @@ export function hideTooltip() {
   _current.cleanup();
   _current.tooltipEl.remove();
   _current = null;
+}
+
+export function scheduleHide(ms = 300) {
+  if (_hideTimer) clearTimeout(_hideTimer);
+  _hideTimer = setTimeout(() => {
+    _hideTimer = null;
+    hideTooltip();
+  }, ms);
 }
 
 export function isTooltipVisible() {
