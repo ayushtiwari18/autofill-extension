@@ -1,12 +1,16 @@
 /**
- * Autofill Executor - Phase 8
- * Key fix: use querySelectorAll[index] when selector matches multiple elements
- * (Google Forms uses jsname="YPqjbf" on ALL inputs)
+ * executor.js — SmartFill A7
  *
- * Fix (Issue 4): triggerEvents() now fires a proper InputEvent with data
- * payload + KeyboardEvent pair, matching the same fix applied to
- * autofiller.js nativeSet(). Bare Event('input') is not enough for
- * Angular/Polymer-controlled inputs like Google Forms.
+ * Additions over A6:
+ *   - fillSelectElement(): handles Google Forms custom <div role="option">
+ *     dropdowns in addition to native <select> elements.
+ *   - setValue(): calls fillSelectElement() for select/listbox types.
+ *
+ * Existing fixes retained:
+ *   - nativeSet via Object.getOwnPropertyDescriptor
+ *   - InputEvent with data payload (Angular/Polymer / Google Forms)
+ *   - KeyboardEvent keydown+keyup pair
+ *   - triggerEvents fires: InputEvent, keydown, keyup, change, blur
  */
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -19,22 +23,16 @@ function findElement(match) {
     try {
       const all = document.querySelectorAll(formFieldSelector);
       console.log(`  ℹ querySelectorAll("${formFieldSelector}") → ${all.length} element(s)`);
-
-      if (all.length === 1) {
-        console.log(`  ✔ Unique selector — using element directly`);
-        return all[0];
-      }
-
+      if (all.length === 1)  { console.log(`  ✔ Unique selector`); return all[0]; }
       if (all.length > 1) {
         if (typeof formFieldIndex === 'number' && formFieldIndex < all.length) {
           const el = all[formFieldIndex];
-          console.log(`  ✔ Ambiguous selector — picked index [${formFieldIndex}]:`, el.outerHTML.slice(0, 120));
+          console.log(`  ✔ Ambiguous selector — picked index [${formFieldIndex}]:`, el.outerHTML.slice(0, 80));
           return el;
         }
-        console.warn(`  ⚠ Ambiguous selector but no index — falling back to [0]`);
+        console.warn(`  ⚠ Ambiguous selector, no index — falling back to [0]`);
         return all[0];
       }
-
       console.warn(`  ✘ selector found nothing: ${formFieldSelector}`);
     } catch (e) {
       console.warn(`  ✘ Invalid CSS selector: ${formFieldSelector}`, e.message);
@@ -67,6 +65,54 @@ function isElementFillable(element) {
   return { fillable: true, reason: null };
 }
 
+/**
+ * fillSelectElement — handles both native <select> and
+ * Google Forms' custom <div role="listbox"> / <div role="option"> widgets.
+ */
+function fillSelectElement(element, value) {
+  const str = String(value).toLowerCase().trim();
+
+  // Native <select>
+  if (element.tagName === 'SELECT') {
+    const opt = Array.from(element.options).find(o =>
+      o.value.toLowerCase() === str || o.text.toLowerCase() === str
+    );
+    if (opt) {
+      element.value = opt.value;
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      console.log(`  ✔ Native <select> filled → "${opt.text}"`);
+      return true;
+    }
+    console.warn(`  ✘ Native <select> — no option matched "${value}"`);
+    return false;
+  }
+
+  // Google Forms / custom listbox: click the element to open dropdown,
+  // then click the matching [role="option"] child
+  element.click();
+  element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+
+  // Give the dropdown time to render its options
+  setTimeout(() => {
+    const container = element.closest('[role="listbox"]') || document;
+    const options = container.querySelectorAll('[role="option"], [data-value]');
+    console.log(`  ℹ custom listbox: found ${options.length} option element(s)`);
+
+    for (const opt of options) {
+      const text = (opt.textContent || opt.getAttribute('data-value') || '').toLowerCase().trim();
+      if (text === str || text.includes(str) || str.includes(text)) {
+        opt.click();
+        opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        console.log(`  ✔ Custom listbox clicked → "${opt.textContent.trim()}"`);
+        return;
+      }
+    }
+    console.warn(`  ✘ Custom listbox — no option matched "${value}"`);
+  }, 200);
+
+  return true; // optimistic — we fired the click
+}
+
 function setValue(element, value) {
   try {
     if (value === null || value === undefined || value === '') {
@@ -76,24 +122,20 @@ function setValue(element, value) {
     if (Array.isArray(value)) value = value.join(', ');
     const str = String(value);
     const tag = element.tagName.toLowerCase();
-    console.log(`  ℹ setValue → tag=${tag} type=${element.type} value="${str}"`);
+    const role = (element.getAttribute('role') || '').toLowerCase();
+    console.log(`  ℹ setValue → tag=${tag} type=${element.type} role=${role} value="${str}"`);
 
-    if (tag === 'select') {
-      const opt = Array.from(element.options).find(o =>
-        o.value === str || o.text === str ||
-        o.value.toLowerCase() === str.toLowerCase() ||
-        o.text.toLowerCase() === str.toLowerCase()
-      );
-      if (opt) { element.value = opt.value; console.log(`  ✔ Select matched: "${opt.text}"`); return true; }
-      console.warn(`  ✘ No option matched "${str}"`);
-      return false;
+    // Delegate select / listbox types
+    if (tag === 'select' || role === 'listbox' ||
+        element.type === 'select-one' || element.type === 'select-multiple') {
+      return fillSelectElement(element, str);
     }
 
     if (tag === 'input' || tag === 'textarea') {
-      // Step 1: activate the field so the framework initialises its model
       element.focus();
-
-      const proto = tag === 'textarea' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+      const proto = tag === 'textarea'
+        ? window.HTMLTextAreaElement.prototype
+        : window.HTMLInputElement.prototype;
       const desc = Object.getOwnPropertyDescriptor(proto, 'value');
       if (desc && desc.set) {
         desc.set.call(element, str);
@@ -119,41 +161,23 @@ function setValue(element, value) {
 }
 
 /**
- * triggerEvents — fire the full event sequence needed for
- * Angular/Polymer (Google Forms) to register a programmatic fill.
- *
- * Fix (Issue 4): replaced bare Event('input') with:
- *   - InputEvent with data payload (Angular/Polymer listen to InputEvent.data)
- *   - KeyboardEvent keydown+keyup pair (Google Forms model update is
- *     gated on keyboard interaction)
- *   - Event('change') to finalize
+ * triggerEvents — fire the full event sequence for Angular/Polymer.
+ * InputEvent with data payload + keydown/keyup + change + blur.
  */
 function triggerEvents(element) {
   try {
     const str = String(element.value || '');
-
-    // InputEvent with data payload — required for Angular/Polymer
     element.dispatchEvent(new InputEvent('input', {
-      bubbles: true,
-      cancelable: true,
-      data: str,
-      inputType: 'insertText',
+      bubbles: true, cancelable: true, data: str, inputType: 'insertText',
     }));
-
-    // Keyboard events — Google Forms gates model update on these
     ['keydown', 'keyup'].forEach(evtName => {
       element.dispatchEvent(new KeyboardEvent(evtName, {
-        bubbles: true,
-        cancelable: true,
-        key: str.slice(-1) || ' ',
-        code: 'KeyA',
+        bubbles: true, cancelable: true,
+        key: str.slice(-1) || ' ', code: 'KeyA',
       }));
     });
-
-    // change + blur to finalize
     element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
     element.dispatchEvent(new Event('blur',   { bubbles: true, cancelable: true }));
-
     console.log(`  ✔ Events fired: InputEvent(data), keydown, keyup, change, blur`);
   } catch (e) {
     console.error('[Executor] triggerEvents error:', e);
@@ -170,10 +194,16 @@ function fillSingleField(match) {
   const { fillable, reason } = isElementFillable(el);
   if (!fillable) return { success: false, reason, label: match.formFieldLabel, skipped: true };
 
+  const tag  = el.tagName.toLowerCase();
+  const role = (el.getAttribute('role') || '').toLowerCase();
+  const isSelectType = tag === 'select' || role === 'listbox';
+
   const ok = setValue(el, match.profileValue);
   if (!ok) return { success: false, reason: 'setValue failed', label: match.formFieldLabel };
 
-  triggerEvents(el);
+  // Don't fire input events on select elements — change was already dispatched
+  if (!isSelectType) triggerEvents(el);
+
   console.log(`  ✅ Filled: "${match.formFieldLabel}"`);
   return { success: true, label: match.formFieldLabel };
 }

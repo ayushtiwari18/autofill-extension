@@ -1,32 +1,22 @@
 /**
- * profileMatcher.js — SmartFill A6 (dev-mode patched)
+ * profileMatcher.js — SmartFill A7
  *
- * In DEV_MODE=true, loadProfile() injects DEV_PROFILE directly instead
- * of relying on IndexedDB. This means you never need to fill the Options
- * page during development — just run npm run build and reload.
+ * loadProfile() now returns the full NESTED profile object
+ * (profile.personal / .education / .experience / .links)
+ * so simpleMapper.js can traverse it with get(p, 'personal', 'firstName').
  *
- * IDB nested shape → flattened keys used in LABEL_MAP:
- *   personal.firstName  → first_name
- *   personal.lastName   → last_name
- *   personal.email      → email
- *   personal.phone      → phone
- *   personal.city       → city
- *   personal.state      → state
- *   personal.country    → country
- *   education.university → college
- *   education.degree    → degree
- *   education.graduationYear → grad_year
- *   experience.currentRole   → job_position
- *   experience.currentCompany → company
- *   experience.skills        → skills
- *   links.linkedin      → linkedin
- *   links.github        → github
- *   links.portfolio     → portfolio
+ * In DEV_MODE: returns DEV_PROFILE.profile (the nested subtree).
+ * In PROD MODE: returns the IDB record's .profile subtree (or the record itself
+ *               if it was saved flat).
+ *
+ * matchFieldToProfile() is kept for backwards-compat but the main
+ * fill path now goes through simpleMapper → executor.
  */
 
-import { getProfile } from '../storage/idb.js';
-import { DEV_MODE, DEV_PROFILE } from '../devData.js';
+import { getProfile as getIdbProfile } from '../storage/idb.js';
+import { DEV_MODE, DEV_PROFILE }       from '../devData.js';
 
+// ── LABEL_MAP kept for any code still using matchFieldToProfile() directly ───
 const LABEL_MAP = [
   { keys: ['full name', 'full_name', 'your name', 'name'],
     profile: ['full_name', 'fullName'] },
@@ -60,8 +50,7 @@ const LABEL_MAP = [
     profile: ['github'] },
   { keys: ['portfolio', 'portfolio url', 'website', 'personal url'],
     profile: ['portfolio'] },
-  { keys: ['skills', 'key skills', 'technical skills',
-           'areas of expertise'],
+  { keys: ['skills', 'key skills', 'technical skills', 'areas of expertise'],
     profile: ['skills'] },
   { keys: ['job position', 'position', 'role', 'current role',
            'designation', 'job title', 'title'],
@@ -71,21 +60,17 @@ const LABEL_MAP = [
 ];
 
 /**
- * Flatten the nested IDB/DEV profile record into a single-level object.
- * Works for both DEV_PROFILE shape and the live IDB shape.
+ * flattenProfile — keeps the old flat shape for matchFieldToProfile().
  */
 function flattenProfile(record) {
   if (!record) return {};
-
-  // DEV_PROFILE wraps everything under a `profile` key
   const root = record.profile || record;
-
-  const p = {};
   const per = root.personal   || {};
   const edu = root.education  || {};
   const exp = root.experience || {};
   const lnk = root.links      || {};
 
+  const p = {};
   p.first_name   = per.firstName       || '';
   p.last_name    = per.lastName        || '';
   p.email        = per.email           || '';
@@ -93,37 +78,26 @@ function flattenProfile(record) {
   p.city         = per.city            || '';
   p.state        = per.state           || '';
   p.country      = per.country         || '';
-
   p.college      = edu.university      || '';
   p.university   = edu.university      || '';
   p.degree       = edu.degree          || '';
   p.grad_year    = edu.graduationYear  || '';
-
   p.job_position = exp.currentRole     || '';
   p.company      = exp.currentCompany  || '';
-  p.skills       = Array.isArray(exp.skills)
-                     ? exp.skills.join(', ')
-                     : (exp.skills || '');
-
+  p.skills       = Array.isArray(exp.skills) ? exp.skills.join(', ') : (exp.skills || '');
   p.linkedin     = lnk.linkedin        || '';
   p.github       = lnk.github          || '';
   p.portfolio    = lnk.portfolio || lnk.website || '';
+  p.full_name    = [p.first_name, p.last_name].filter(Boolean).join(' ');
 
-  // synthesise full_name from parts
-  p.full_name = [p.first_name, p.last_name].filter(Boolean).join(' ');
-
-  // also copy flat camelCase keys (Options page writes these directly)
-  const CAMEL_KEYS = [
-    'fullName','firstName','lastName','email','phone',
+  // camelCase keys
+  const CAMEL = ['fullName','firstName','lastName','email','phone',
     'city','state','country','college','degree','gradYear',
-    'currentRole','currentCompany','skills',
-    'linkedin','github','portfolio',
-  ];
-  for (const k of CAMEL_KEYS) {
+    'currentRole','currentCompany','skills','linkedin','github','portfolio'];
+  for (const k of CAMEL) {
     if (root[k] !== undefined && root[k] !== '') p[k] = root[k];
   }
   if (!p.full_name && root.fullName) p.full_name = root.fullName;
-
   return p;
 }
 
@@ -137,39 +111,55 @@ export function labelToProfileKey(label) {
   return null;
 }
 
+/**
+ * loadProfile()
+ *
+ * Returns the NESTED profile subtree so simpleMapper.js can use
+ * get(p, 'personal', 'firstName') etc.
+ *
+ * Shape returned:
+ * {
+ *   personal:   { firstName, lastName, email, phone, city, ... },
+ *   education:  { university, degree, graduationYear, gpa, ... },
+ *   experience: { currentRole, currentCompany, yearsOfExperience, skills },
+ *   links:      { linkedin, github, portfolio, website }
+ * }
+ */
 export async function loadProfile() {
-  // ── DEV MODE: bypass IDB entirely, use devData.js ────────────────
   if (DEV_MODE) {
-    console.log('[Profile] ⚡ DEV_MODE=true — using DEV_PROFILE (bypassing IDB)');
-    const flat = flattenProfile(DEV_PROFILE);
-    const keys = Object.keys(flat).filter(k => flat[k] !== '');
-    console.log(`[Profile] DEV_PROFILE flattened → ${keys.length} key(s):`, keys);
-    console.log('[Profile] DEV_PROFILE values:', JSON.stringify(flat).slice(0, 200));
-    return flat;
+    console.log('[Profile] ⚡ DEV_MODE — returning DEV_PROFILE.profile (nested)');
+    const nested = DEV_PROFILE.profile || DEV_PROFILE;
+    console.log('[Profile] DEV nested keys:', Object.keys(nested).join(', '));
+    return nested;
   }
 
-  // ── PRODUCTION MODE: load from IndexedDB ─────────────────────────
   try {
-    const record = await getProfile();
+    const record = await getIdbProfile();
     if (!record) {
-      console.warn('[Profile] IDB profile is empty — please fill out the Options page first');
+      console.warn('[Profile] IDB empty — fill the Options page first');
       return {};
     }
-    const flat = flattenProfile(record);
-    const keys = Object.keys(flat).filter(k => flat[k] !== '');
-    console.log(`[Profile] loaded and flattened ${keys.length} key(s) from IDB`);
-    return flat;
+    // Return the nested subtree; if the record was saved flat, wrap it
+    const nested = record.profile || record;
+    console.log('[Profile] IDB profile loaded — top-level keys:', Object.keys(nested).join(', '));
+    return nested;
   } catch (e) {
-    console.warn('[Profile] Failed to load IDB profile:', e.message);
+    console.warn('[Profile] IDB load failed:', e.message);
     return {};
   }
 }
 
+/**
+ * matchFieldToProfile — legacy flat matcher, kept for compatibility.
+ * New code should use simpleMapper + loadProfile().
+ */
 export function matchFieldToProfile(fieldInfo, profile) {
+  // If profile is nested (has .personal), flatten it first
+  const flat = profile.personal ? flattenProfile({ profile }) : profile;
   const candidates = labelToProfileKey(fieldInfo.label);
   if (!candidates) return null;
   for (const key of candidates) {
-    const val = profile[key];
+    const val = flat[key];
     if (val !== undefined && val !== '') return String(val);
   }
   return null;
