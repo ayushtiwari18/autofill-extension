@@ -47,12 +47,16 @@ module.exports = {
   plugins: [
     new CopyPlugin({
       patterns: [
-        { from: 'public', to: 'public' },
-        { from: 'manifest.json', to: 'manifest.json' }
+        { from: 'public',       to: 'public'  },
+        { from: 'manifest.json',to: 'manifest.json' },
+        // Options page — plain HTML/CSS/JS, no bundling needed
+        { from: 'src/options',  to: 'options' },
+        // IDB + schema modules used by options.js at runtime
+        { from: 'src/storage',  to: 'storage' },
+        // Fingerprint engine (used by content script at runtime)
+        { from: 'src/engine',   to: 'engine'  },
       ]
     })
   ],
-  // Source maps for development debugging
-  // In production build this is overridden to false for smaller bundle size
   devtool: 'cheap-module-source-map'
 };
