@@ -1,18 +1,26 @@
 /**
- * autofiller.js — SmartFill A7
+ * autofiller.js — SmartFill A7 (bugfix patch)
  *
- * Wired to simpleMapper + executor for end-to-end filling.
+ * FIXES applied in this revision:
  *
- * Flow on field focus:
- *   1. Load profile (DEV or IDB)
- *   2. Build a single-field formData stub
- *   3. simpleMapProfileToForm() → produces a match with profileValue
- *   4. executeAutofill([match]) → nativeSet + full event sequence
+ * Bug 1 — fieldInfo.type was always undefined:
+ *   fieldScanner.js now exports `type` as an alias of `fieldType`.
+ *   No change needed here, but the formData builder now reliably gets
+ *   the correct type from fieldInfo.type.
  *
- * Handles:
- *   - <input> / <textarea>  via executor nativeSet
- *   - Native <select>        via executor setValue
- *   - Google Forms custom SELECT (DIV role=listbox) via handleSelectFill
+ * Bug 2 — formFieldSelector was empty, causing executor findElement() to
+ *   return null and silently abort every fill:
+ *   fieldScanner.js now exports a precomputed `selector` per field.
+ *   The formData builder passes it through as `selector: fieldInfo.selector`.
+ *
+ * Bug 3 — After tooltip onAccept, executeAutofill([match]) tried to
+ *   re-discover the element via the (previously empty) formFieldSelector.
+ *   Fix: we already hold `el` — write directly to it using the same
+ *   nativeSet + event sequence that executor.js uses, bypassing the
+ *   re-discovery step entirely.
+ *
+ * Original flow (unchanged):
+ *   focus → runAutofill → simpleMapper → showTooltip → onAccept → fill
  */
 
 import { loadProfile as loadProfileFromMatcher } from './profileMatcher.js';
@@ -36,10 +44,7 @@ async function getProfile() {
 }
 
 // ── Google Forms custom SELECT handler ───────────────────────────────────────
-// Google Forms renders dropdowns as <div role="listbox"> with <div role="option">
-// children. Clicking the wrapper opens it, then we click the matching option.
 function handleSelectFill(el, value) {
-  // Try native <select> first
   if (el.tagName === 'SELECT') {
     const opt = Array.from(el.options).find(o =>
       o.value.toLowerCase() === String(value).toLowerCase() ||
@@ -55,8 +60,6 @@ function handleSelectFill(el, value) {
     return false;
   }
 
-  // Google Forms custom listbox: find the wrapper div with role=listbox
-  // and click the matching option child
   const container = el.closest('[role="listbox"]') || el;
   const options = container.querySelectorAll('[role="option"], [data-value]');
   if (options.length === 0) {
@@ -64,11 +67,9 @@ function handleSelectFill(el, value) {
     return false;
   }
 
-  // Open the dropdown by clicking the container
   el.click();
   el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
 
-  // Find and click the matching option
   const norm = String(value).toLowerCase().trim();
   for (const opt of options) {
     const text = (opt.textContent || opt.getAttribute('data-value') || '').toLowerCase().trim();
@@ -109,31 +110,68 @@ function showBadge(el) {
   setTimeout(() => badge.remove(), 2500);
 }
 
+// ── FIX Bug 3: Direct fill helper ────────────────────────────────────────────
+// After the tooltip is accepted we already hold `el`.
+// Write to it directly instead of going through executeAutofill's
+// findElement() re-discovery (which fails when selector is empty).
+function fillElementDirectly(el, value) {
+  const str = String(value);
+  const tag  = el.tagName.toLowerCase();
+  try {
+    el.focus();
+    const proto = tag === 'textarea'
+      ? window.HTMLTextAreaElement.prototype
+      : window.HTMLInputElement.prototype;
+    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (desc && desc.set) {
+      desc.set.call(el, str);
+    } else {
+      el.value = str;
+    }
+    // Fire the full event sequence React/Angular/Polymer need
+    el.dispatchEvent(new InputEvent('input', {
+      bubbles: true, cancelable: true, data: str, inputType: 'insertText',
+    }));
+    ['keydown', 'keyup'].forEach(evtName => {
+      el.dispatchEvent(new KeyboardEvent(evtName, {
+        bubbles: true, cancelable: true,
+        key: str.slice(-1) || ' ', code: 'KeyA',
+      }));
+    });
+    el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    el.dispatchEvent(new Event('blur',   { bubbles: true, cancelable: true }));
+    console.log(`[Autofiller][${FRAME_TYPE}] fillElementDirectly ✅ "${str}" → ${tag}`);
+    return true;
+  } catch (e) {
+    console.error(`[Autofiller][${FRAME_TYPE}] fillElementDirectly error:`, e);
+    return false;
+  }
+}
+
 // ── Core: run the full match → fill pipeline for one field ───────────────────
 async function runAutofill(fieldInfo, el) {
   const rawProfile = await getProfile();
 
   // Build a minimal formData object for simpleMapper
+  // FIX Bug 2: use fieldInfo.selector (now set by fieldScanner.js buildSelector())
   const formData = {
     url: window.location.href,
     forms: [{
       id: 'sf-single',
       hasCaptcha: false,
       fields: [{
-        id:            el.id         || '',
-        name:          el.name       || '',
+        id:            el.id          || '',
+        name:          el.name        || '',
         label:         fieldInfo.label        || '',
         ariaLabel:     fieldInfo.ariaLabel    || el.getAttribute('aria-label') || '',
         placeholder:   el.placeholder         || fieldInfo.placeholder || '',
-        type:          fieldInfo.type         || el.type || 'text',
-        selector:      fieldInfo.selector     || '',
+        type:          fieldInfo.type         || el.type || 'text',  // FIX Bug 1
+        selector:      fieldInfo.selector     || '',                  // FIX Bug 2
         selectorIndex: typeof fieldInfo.selectorIndex === 'number' ? fieldInfo.selectorIndex : 0,
       }]
     }]
   };
 
-  // simpleMapper expects the NESTED profile (profile.personal / .education etc)
-  // rawProfile is the full DEV_PROFILE.profile object or IDB record
   const innerProfile = rawProfile.personal ? rawProfile : (rawProfile.profile || rawProfile);
 
   console.log(`[Autofiller][${FRAME_TYPE}] simpleMapper running for label="${fieldInfo.label}"`);
@@ -180,7 +218,6 @@ export function attachAutofiller(fieldInfo) {
                     rect.top < window.innerHeight && rect.bottom > 0;
 
     if (isSelect) {
-      // Select fields: fill directly without tooltip
       console.log(`[Autofiller][${FRAME_TYPE}] SELECT fill → "${match.profileValue}"`);
       const ok = handleSelectFill(el, match.profileValue);
       if (ok) showBadge(el);
@@ -191,14 +228,14 @@ export function attachAutofiller(fieldInfo) {
       console.log(`[Autofiller][${FRAME_TYPE}] showing tooltip for label="${fieldInfo.label}"`);
       showTooltip(el, { label: fieldInfo.label, value: match.profileValue }, (accepted) => {
         console.log(`[Autofiller][${FRAME_TYPE}] ✅ user accepted → filling "${fieldInfo.label}" = "${accepted}"`);
-        // Update match value in case user edited it in the tooltip
-        match.profileValue = accepted;
-        executeAutofill([match]);
-        showBadge(el);
+        // FIX Bug 3: write directly to `el` — no re-discovery needed
+        const ok = fillElementDirectly(el, accepted);
+        if (ok) showBadge(el);
       });
     } else {
       console.log(`[Autofiller][${FRAME_TYPE}] offscreen — silent fill "${fieldInfo.label}" → "${match.profileValue}"`);
-      executeAutofill([match]);
+      // For offscreen fields we still have el, use direct fill too
+      fillElementDirectly(el, match.profileValue);
     }
   });
 
