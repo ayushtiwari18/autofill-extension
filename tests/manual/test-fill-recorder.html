@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>A4 — Fill Recorder Test</title>
+  <style>
+    body  { font-family: system-ui, sans-serif; max-width: 860px; margin: 40px auto; padding: 0 20px; background: #0f0f17; color: #cdd6f4; }
+    h1    { color: #89b4fa; }
+    p.sub { color: #6c7086; margin-top: 0; }
+    .card { background: #1e1e2e; border: 1px solid #313244; border-radius: 10px; padding: 20px 24px; margin: 16px 0; }
+    .card h2 { margin: 0 0 14px; font-size: 1rem; color: #a6e3a1; }
+    label  { display: block; font-size: 0.78rem; color: #a6adc8; margin-bottom: 4px; text-transform: uppercase; letter-spacing:.05em; }
+    input, select, textarea { background: #313244; color: #cdd6f4; border: 1.5px solid #45475a; border-radius: 6px; padding: 8px 12px; font-size: 0.9rem; width: 100%; box-sizing: border-box; margin-bottom: 14px; }
+    input:focus, select:focus, textarea:focus { border-color: #89b4fa; outline: none; }
+    button { background: #89b4fa; color: #1e1e2e; border: none; padding: 9px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; margin: 4px 4px 4px 0; }
+    button:hover { background: #74c7ec; }
+    button.red { background: #f38ba8; }
+    pre    { background: #181825; border-radius: 6px; padding: 12px; font-size: 0.78rem; white-space: pre-wrap; max-height: 340px; overflow-y: auto; color: #cdd6f4; }
+    .pass  { color: #a6e3a1; font-weight: 700; }
+    .fail  { color: #f38ba8; font-weight: 700; }
+    .step  { color: #f9e2af; font-weight: 600; margin: 8px 0 4px; }
+  </style>
+</head>
+<body>
+
+<h1>📝 Commit A4 — Fill Recorder Test</h1>
+<p class="sub">Open this file INSIDE the extension context (chrome-extension://) for IDB writes to work.<br>
+Or: open via <code>chrome://extensions → SmartFill → Details → Inspect Views → background page</code> method.<br>
+<strong>Easiest: load extension, open options page, come back here via the extension’s service worker test.</strong></p>
+
+<!-- ── FORM ──────────────────────────────────────────────── -->
+<div class="card">
+  <h2>Step 1 — Fill these fields (simulates a real job form)</h2>
+  <p style="color:#6c7086;font-size:.83rem;margin:0 0 12px">Fill each field and tab away. The recorder should write to IDB after 600ms.</p>
+
+  <label for="t-name">Full Name *</label>
+  <input type="text" id="t-name" placeholder="Ayush Tiwari" />
+
+  <label for="t-email">Email Address *</label>
+  <input type="email" id="t-email" placeholder="you@example.com" />
+
+  <label for="t-phone">Contact Number *</label>
+  <input type="tel" id="t-phone" placeholder="+91 98765 43210" />
+
+  <label for="t-college">College / University *</label>
+  <input type="text" id="t-college" placeholder="RGPV University" />
+
+  <label for="t-degree">Degree</label>
+  <select id="t-degree">
+    <option value="">Select…</option>
+    <option value="B.Tech">B.Tech</option>
+    <option value="MCA">MCA</option>
+    <option value="MBA">MBA</option>
+  </select>
+
+  <label for="t-bio">Short Bio (optional)</label>
+  <textarea id="t-bio" rows="2" placeholder="Tell us about yourself..."></textarea>
+</div>
+
+<!-- ── ACTIONS ─────────────────────────────────────────── -->
+<div class="card">
+  <h2>Step 2 — Verify IDB writes</h2>
+  <button onclick="readIDB()">🔍 Read field_memory store</button>
+  <button onclick="clearIDB()" class="red">🗑 Clear field_memory</button>
+  <p class="step">After filling fields above (wait 1s), click Read to see records:</p>
+  <pre id="out">— click Read —</pre>
+</div>
+
+<script type="module">
+
+// ── Inline IDB helpers (same as idb.js — no build needed) ────────────
+
+const DB_NAME    = 'smartfill_db';
+const DB_VERSION = 1;
+const STORES     = { FIELD_MEMORY: 'field_memory', PROFILE: 'profile', PLATFORM_PATTERNS: 'platform_patterns' };
+
+let _db = null;
+function openDB() {
+  if (_db) return Promise.resolve(_db);
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORES.PROFILE))
+        db.createObjectStore(STORES.PROFILE, { keyPath: 'key' });
+      if (!db.objectStoreNames.contains(STORES.FIELD_MEMORY)) {
+        const s = db.createObjectStore(STORES.FIELD_MEMORY, { keyPath: 'fingerprint' });
+        s.createIndex('by_domain', 'domain', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORES.PLATFORM_PATTERNS)) {
+        const s = db.createObjectStore(STORES.PLATFORM_PATTERNS, { keyPath: 'id', autoIncrement: true });
+        s.createIndex('by_domain', 'domain', { unique: false });
+      }
+    };
+    req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+function normalizeLabel(rawLabel) {
+  if (rawLabel === null || rawLabel === undefined) return '';
+  let s = String(rawLabel).toLowerCase();
+  s = s.replace(/\s*\(required\)\s*/gi, ' ').replace(/\s*\(optional\)\s*/gi, ' ');
+  s = s.replace(/\brequired\b/gi, '').replace(/\boptional\b/gi, '');
+  s = s.replace(/\([^)]*\)/g, '').replace(/\*/g, '');
+  s = s.replace(/^[:\-_;]+/, '').replace(/[:\-_;]+$/, '');
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+function detectFieldType(el) {
+  const tag = el.tagName.toLowerCase();
+  const role = (el.getAttribute('role') || '').toLowerCase();
+  if (tag === 'textarea') return 'textarea';
+  if (tag === 'select')   return 'select';
+  if (role === 'radiogroup') return 'radio';
+  if (role === 'group')      return 'checkbox';
+  if (tag === 'input') {
+    const t = (el.type || 'text').toLowerCase();
+    if (['text','search','password'].includes(t)) return 'text';
+    return t;
+  }
+  return 'unknown';
+}
+
+function extractLabelText(el) {
+  const labelledBy = el.getAttribute('aria-labelledby');
+  if (labelledBy) {
+    const texts = labelledBy.trim().split(/\s+/).map(id => document.getElementById(id))
+      .filter(Boolean).map(n => n.textContent.trim()).filter(Boolean);
+    if (texts.length) return texts.join(' ');
+  }
+  const ariaLabel = el.getAttribute('aria-label');
+  if (ariaLabel?.trim()) return ariaLabel.trim();
+  if (el.id) {
+    const lbl = document.querySelector(`label[for="${el.id}"]`);
+    if (lbl) return lbl.textContent.trim();
+  }
+  const ph = el.getAttribute('placeholder');
+  if (ph?.trim()) return ph.trim();
+  return el.name || el.id || '';
+}
+
+async function recordFill({ fingerprint, domain, label, fieldType, value }) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const t    = db.transaction(STORES.FIELD_MEMORY, 'readwrite');
+    const store = t.objectStore(STORES.FIELD_MEMORY);
+    const getReq = store.get(fingerprint);
+    getReq.onsuccess = e => {
+      const existing = e.target.result;
+      let record;
+      if (existing) {
+        const entry = existing.values.find(v => v.value === value);
+        if (entry) { entry.usedCount++; entry.lastUsed = Date.now(); }
+        else existing.values.push({ value, usedCount: 1, lastUsed: Date.now() });
+        record = { ...existing, updatedAt: Date.now() };
+      } else {
+        record = { fingerprint, domain, label, fieldType,
+          values: [{ value, usedCount: 1, lastUsed: Date.now() }],
+          confirmed: false, createdAt: Date.now(), updatedAt: Date.now() };
+      }
+      store.put(record);
+    };
+    t.oncomplete = () => resolve();
+    t.onerror    = e => reject(e.target.error);
+  });
+}
+
+// ── Attach recorders to test fields ─────────────────────────────
+
+const DOMAIN = 'test-a4.local';
+const DEBOUNCE = 600;
+const timers = new WeakMap();
+
+function attachRecorder(el) {
+  const rawLabel  = extractLabelText(el);
+  const label     = normalizeLabel(rawLabel);
+  const fieldType = detectFieldType(el);
+  const fingerprint = label ? `${DOMAIN}::${label}::${fieldType}` : '';
+  if (!fingerprint) return;
+
+  const handler = () => {
+    clearTimeout(timers.get(el));
+    timers.set(el, setTimeout(async () => {
+      const value = el.tagName === 'SELECT'
+        ? (el.options[el.selectedIndex]?.text?.trim() || el.value)
+        : el.value.trim();
+      if (!value) return;
+      await recordFill({ fingerprint, domain: DOMAIN, label, fieldType, value });
+      log(`✅ Recorded: "${value}" → ${fingerprint}`);
+    }, DEBOUNCE));
+  };
+  el.addEventListener('change', handler);
+  el.addEventListener('input', handler);
+}
+
+const fields = ['t-name','t-email','t-phone','t-college','t-degree','t-bio']
+  .map(id => document.getElementById(id)).filter(Boolean);
+fields.forEach(attachRecorder);
+log(`🔧 Recorders attached to ${fields.length} fields. Fill them and wait 600ms…`);
+
+// ── Read / Clear IDB ────────────────────────────────────────────
+
+window.readIDB = async () => {
+  const db = await openDB();
+  const t  = db.transaction(STORES.FIELD_MEMORY, 'readonly');
+  const req = t.objectStore(STORES.FIELD_MEMORY).getAll();
+  req.onsuccess = e => {
+    const records = e.target.result;
+    if (!records.length) { document.getElementById('out').textContent = '(empty — fill fields first and wait 600ms)'; return; }
+    document.getElementById('out').textContent = JSON.stringify(records, null, 2);
+  };
+};
+
+window.clearIDB = async () => {
+  const db = await openDB();
+  const t  = db.transaction(STORES.FIELD_MEMORY, 'readwrite');
+  t.objectStore(STORES.FIELD_MEMORY).clear();
+  t.oncomplete = () => { document.getElementById('out').textContent = '(cleared)'; log('🗑 field_memory cleared'); };
+};
+
+// ── Logger ─────────────────────────────────────────────────────
+
+const _logs = [];
+function log(msg) {
+  _logs.unshift(`[${new Date().toLocaleTimeString()}] ${msg}`);
+  const out = document.getElementById('out');
+  if (out.textContent.startsWith('(') || out.textContent === '— click Read —') {
+    out.textContent = _logs.join('\n');
+  }
+}
+
+</script>
+</body>
+</html>
