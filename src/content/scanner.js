@@ -16,7 +16,9 @@ function injectTooltipStyles() {
   const link = document.createElement('link');
   link.id   = 'sf-tooltip-styles';
   link.rel  = 'stylesheet';
-  link.href = chrome.runtime.getURL('src/content/tooltip.css');
+  // tooltip.css is copied to dist/content/tooltip.css by CopyPlugin
+  // and declared in manifest web_accessible_resources as 'content/tooltip.css'
+  link.href = chrome.runtime.getURL('content/tooltip.css');
   (document.head || document.documentElement).appendChild(link);
   console.log(`[SmartFill][${FRAME_TYPE}] tooltip.css injected`);
 }

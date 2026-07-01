@@ -34,7 +34,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["src/content/tooltip.css"],
+      "resources": ["content/tooltip.css"],
       "matches": ["<all_urls>"]
     }
   ],

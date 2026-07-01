@@ -47,14 +47,16 @@ module.exports = {
   plugins: [
     new CopyPlugin({
       patterns: [
-        { from: 'public',       to: 'public'  },
-        { from: 'manifest.json',to: 'manifest.json' },
+        { from: 'public',                    to: 'public'   },
+        { from: 'manifest.json',             to: 'manifest.json' },
         // Options page — plain HTML/CSS/JS, no bundling needed
-        { from: 'src/options',  to: 'options' },
+        { from: 'src/options',               to: 'options'  },
         // IDB + schema modules used by options.js at runtime
-        { from: 'src/storage',  to: 'storage' },
+        { from: 'src/storage',               to: 'storage'  },
         // Fingerprint engine (used by content script at runtime)
-        { from: 'src/engine',   to: 'engine'  },
+        { from: 'src/engine',                to: 'engine'   },
+        // Tooltip stylesheet — must be web-accessible for content script injection
+        { from: 'src/content/tooltip.css',   to: 'content/tooltip.css' },
       ]
     })
   ],
