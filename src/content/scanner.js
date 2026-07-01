@@ -1,11 +1,11 @@
 /**
- * scanner.js — SmartFill A6 (updated)
+ * scanner.js — SmartFill A6 (fixed)
  * Wires scanFields + observeNewFields + attachAllAutofillers.
- * Also injects tooltip.css once per page load.
+ * Injects tooltip.css once per page load.
  */
 
 import { scanFields, observeNewFields } from './fieldScanner.js';
-import { attachAllRecorders }           from './recorder.js';
+import { attachAllRecorders }           from './fillRecorder.js';
 import { attachAllAutofillers }         from './autofiller.js';
 
 function injectTooltipStyles() {
