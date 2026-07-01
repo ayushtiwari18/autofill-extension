@@ -267,6 +267,65 @@ export async function clearAllFieldMemory() {
   }));
 }
 
+/**
+ * Get top-N ranked suggestions for a field fingerprint.
+ *
+ * Ranking formula (composite score):
+ *   score = usedCount × recencyMultiplier
+ *   recencyMultiplier = 1 / (1 + daysSinceLastUse * 0.1)
+ *
+ * This means:
+ *   - A value used 5× two weeks ago scores lower than one used 3× today
+ *   - Recency decays slowly (10% per day) so old frequent answers still surface
+ *
+ * @param {string} fingerprint — "domain::label::fieldType"
+ * @param {number} [limit=5]   — max suggestions to return
+ * @returns {Promise<Array<{value: string, usedCount: number, lastUsed: number, score: number, source: 'memory'}>>}
+ */
+export async function getTopSuggestions(fingerprint, limit = 5) {
+  console.log(`[IDB] getTopSuggestions → fingerprint="${fingerprint}" limit=${limit}`);
+
+  const record = await getFieldMemory(fingerprint);
+
+  if (!record || !Array.isArray(record.values) || record.values.length === 0) {
+    console.log(`[IDB] getTopSuggestions → no memory found for "${fingerprint}"`);
+    return [];
+  }
+
+  console.log(`[IDB] getTopSuggestions → found ${record.values.length} raw value(s) for "${fingerprint}"`);
+
+  const now = Date.now();
+  const DAY_MS = 1000 * 60 * 60 * 24;
+
+  const scored = record.values.map(entry => {
+    const daysSince = (now - entry.lastUsed) / DAY_MS;
+    const recencyMultiplier = 1 / (1 + daysSince * 0.1);
+    const score = entry.usedCount * recencyMultiplier;
+
+    console.log(
+      `[IDB]   value="${entry.value}" usedCount=${entry.usedCount} ` +
+      `daysSince=${daysSince.toFixed(1)} recency=${recencyMultiplier.toFixed(3)} score=${score.toFixed(3)}`
+    );
+
+    return {
+      value:     entry.value,
+      usedCount: entry.usedCount,
+      lastUsed:  entry.lastUsed,
+      score,
+      source:    'memory',
+    };
+  });
+
+  // Sort descending by score, take top N
+  const results = scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  console.log(`[IDB] getTopSuggestions → returning ${results.length} suggestion(s):`, results.map(r => r.value));
+
+  return results;
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PLATFORM_PATTERNS  operations
@@ -323,6 +382,7 @@ export const idb = {
   getFieldMemoriesByDomain,
   deleteFieldMemory,
   clearAllFieldMemory,
+  getTopSuggestions,
   // platform_patterns
   savePlatformPattern,
   getPlatformPatterns,
