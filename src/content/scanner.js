@@ -4,16 +4,16 @@
  * Injected into every page via manifest content_scripts.
  * Bundled by Webpack into dist/content.js.
  *
- * Responsibilities (Phase 1):
+ * Responsibilities (Phase 1 + 2):
  *   1. Scan page for fillable fields (fieldScanner.js)
- *   2. Attach record-on-fill listeners (fillRecorder.js)
- *   3. Watch for SPA navigation / late-rendered forms
- *
- * Phase 2 will add: autofill on focus, suggestion tooltip.
+ *   2. Attach record-on-fill listeners (fillRecorder.js)     ← A4
+ *   3. Attach autofill-on-focus from profile (autofiller.js) ← A5
+ *   4. Watch for SPA navigation / late-rendered forms
  */
 
-import { scanFields, observeNewFields } from './fieldScanner.js';
-import { attachAllRecorders }           from './fillRecorder.js';
+import { scanFields, observeNewFields }  from './fieldScanner.js';
+import { attachAllRecorders }            from './fillRecorder.js';
+import { attachAllAutofillers }          from './autofiller.js';
 
 const DOMAIN = window.location.hostname;
 
@@ -27,10 +27,12 @@ function init() {
   // Initial scan
   const fields = scanFields(DOMAIN);
   attachAllRecorders(fields, DOMAIN);
+  attachAllAutofillers(fields);            // A5
 
   // Watch for SPA / lazy-rendered fields
   observeNewFields((newFields) => {
     attachAllRecorders(newFields, DOMAIN);
+    attachAllAutofillers(newFields);       // A5
   }, DOMAIN);
 
   console.log(`[SmartFill] init complete — watching ${fields.length} field(s)`);
