@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>A2 — Fingerprint Engine Test</title>
+  <style>
+    body  { font-family: system-ui, sans-serif; max-width: 960px; margin: 40px auto; padding: 0 20px; background: #0f0f17; color: #cdd6f4; }
+    h1    { color: #89b4fa; margin-bottom: 4px; }
+    p.sub { color: #6c7086; margin-top: 0; }
+    .card { background: #1e1e2e; border: 1px solid #313244; border-radius: 10px; padding: 20px 24px; margin: 16px 0; }
+    .card h2 { margin: 0 0 14px; font-size: 1rem; color: #a6e3a1; }
+
+    /* Test table */
+    table  { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+    th     { text-align: left; padding: 8px 10px; color: #89b4fa; border-bottom: 2px solid #313244; }
+    td     { padding: 7px 10px; border-bottom: 1px solid #1e1e2e; vertical-align: top; }
+    tr:nth-child(even) td { background: #181825; }
+    .pass  { color: #a6e3a1; font-weight: 700; }
+    .fail  { color: #f38ba8; font-weight: 700; }
+    .raw   { color: #f9e2af; }
+    .got   { color: #cdd6f4; }
+    .exp   { color: #94e2d5; }
+
+    /* DOM field section */
+    .fields { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; }
+    .field-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 200px; }
+    label  { font-size: 0.8rem; color: #6c7086; }
+    input, textarea, select { background: #313244; color: #cdd6f4; border: 1px solid #45475a;
+      border-radius: 6px; padding: 7px 10px; font-size: 0.9rem; width: 100%; box-sizing: border-box; }
+    button { background: #89b4fa; color: #1e1e2e; border: none; padding: 8px 18px;
+             border-radius: 6px; cursor: pointer; font-weight: 600; margin: 4px 4px 4px 0; }
+    button:hover { background: #74c7ec; }
+    pre    { background: #181825; border-radius: 6px; padding: 12px 16px; font-size: 0.8rem;
+             overflow-x: auto; white-space: pre-wrap; color: #cdd6f4; max-height: 300px; overflow-y:auto; }
+    #summary { font-size: 1.1rem; font-weight: 700; padding: 10px 0; }
+  </style>
+</head>
+<body>
+
+<h1>🔬 Commit A2 — Fingerprint Engine Test</h1>
+<p class="sub">No extension needed. No build step. Open in any browser tab.</p>
+
+<!-- ── SECTION 1: normalizeLabel unit tests ─────────────────────────────── -->
+<div class="card">
+  <h2>Section 1 — normalizeLabel() unit tests</h2>
+  <p style="color:#6c7086;font-size:0.85rem;margin:0 0 12px">All rows must show ✅ PASS for Commit A2 to be complete.</p>
+  <button onclick="runNormalizeTests()">▶ Run All Normalize Tests</button>
+  <div id="summary"></div>
+  <table>
+    <thead><tr><th>#</th><th>Raw Input</th><th>Expected</th><th>Got</th><th>Result</th></tr></thead>
+    <tbody id="normalize-body"></tbody>
+  </table>
+</div>
+
+<!-- ── SECTION 2: buildFingerprint unit tests ───────────────────────────── -->
+<div class="card">
+  <h2>Section 2 — buildFingerprint() unit tests</h2>
+  <button onclick="runFingerprintTests()">▶ Run All Fingerprint Tests</button>
+  <table>
+    <thead><tr><th>#</th><th>domain / label / type</th><th>Expected fingerprint</th><th>Got</th><th>Result</th></tr></thead>
+    <tbody id="fp-body"></tbody>
+  </table>
+</div>
+
+<!-- ── SECTION 3: DOM field extraction ─────────────────────────────────── -->
+<div class="card">
+  <h2>Section 3 — DOM fingerprintField() on real elements</h2>
+  <p style="color:#6c7086;font-size:0.85rem;margin:0 0 12px">Hover or click a field below, then click "Fingerprint Focused Field".</p>
+
+  <div class="fields">
+    <!-- text input with aria-labelledby -->
+    <div class="field-wrap">
+      <div id="lbl-name" style="font-size:.85rem;color:#cdd6f4">Full Name *</div>
+      <input type="text" aria-labelledby="lbl-name" id="inp-name" placeholder="Your name" />
+    </div>
+
+    <!-- email input with label[for] -->
+    <div class="field-wrap">
+      <label for="inp-email" style="color:#cdd6f4;font-size:.85rem">Email Address (Write your correct Email) *</label>
+      <input type="email" id="inp-email" placeholder="you@example.com" />
+    </div>
+
+    <!-- tel input with aria-label -->
+    <div class="field-wrap">
+      <input type="tel" aria-label="Contact Number *" placeholder="+91 XXXXX" id="inp-tel" />
+    </div>
+
+    <!-- textarea with aria-labelledby -->
+    <div class="field-wrap">
+      <div id="lbl-bio" style="font-size:.85rem;color:#cdd6f4">Short Bio (optional)</div>
+      <textarea aria-labelledby="lbl-bio" id="inp-bio" rows="2" placeholder="Tell us about yourself"></textarea>
+    </div>
+
+    <!-- select with label[for] -->
+    <div class="field-wrap">
+      <label for="inp-country" style="color:#cdd6f4;font-size:.85rem">Country (required)</label>
+      <select id="inp-country">
+        <option>India</option><option>USA</option><option>UK</option>
+      </select>
+    </div>
+
+    <!-- Simulated Google Forms radio group -->
+    <div class="field-wrap">
+      <div id="lbl-gender" style="font-size:.85rem;color:#cdd6f4">Gender *</div>
+      <div role="radiogroup" aria-labelledby="lbl-gender" id="inp-radio" style="display:flex;gap:10px;padding:8px 0">
+        <label style="color:#cdd6f4"><input type="radio" name="g" value="M"/> Male</label>
+        <label style="color:#cdd6f4"><input type="radio" name="g" value="F"/> Female</label>
+        <label style="color:#cdd6f4"><input type="radio" name="g" value="O"/> Other</label>
+      </div>
+    </div>
+  </div>
+
+  <br/>
+  <button onclick="runDOMTests()">▶ Fingerprint All DOM Fields</button>
+  <pre id="dom-out">— click button above —</pre>
+</div>
+
+<!-- ── SECTION 4: Edge case stress tests ───────────────────────────────── -->
+<div class="card">
+  <h2>Section 4 — Edge cases (null, empty, all-whitespace, unicode)</h2>
+  <button onclick="runEdgeCases()">▶ Run Edge Cases</button>
+  <table>
+    <thead><tr><th>#</th><th>Input</th><th>Expected</th><th>Got</th><th>Result</th></tr></thead>
+    <tbody id="edge-body"></tbody>
+  </table>
+</div>
+
+<script type="module">
+
+// ── Inline fingerprint.js (no build step needed for manual test) ──────────
+
+function normalizeLabel(rawLabel) {
+  if (rawLabel === null || rawLabel === undefined) return '';
+  let s = String(rawLabel);
+  s = s.toLowerCase();
+  s = s.replace(/\s*\(required\)\s*/gi, ' ');
+  s = s.replace(/\s*\(optional\)\s*/gi,  ' ');
+  s = s.replace(/\brequired\b/gi, '');
+  s = s.replace(/\boptional\b/gi, '');
+  s = s.replace(/\s*\*\s*$/, '');
+  s = s.replace(/^\s*\*\s*/, '');
+  s = s.replace(/\([^)]*\)/g, '');
+  s = s.replace(/^[:\-_;]+/, '').replace(/[:\-_;]+$/, '');
+  s = s.replace(/\s+/g, ' ');
+  return s.trim();
+}
+
+function detectFieldType(el) {
+  if (!el || !el.tagName) return 'unknown';
+  const tag  = el.tagName.toLowerCase();
+  const role = (el.getAttribute('role') || '').toLowerCase();
+  if (tag === 'textarea')      return 'textarea';
+  if (tag === 'select')        return 'select';
+  if (role === 'radiogroup')   return 'radio';
+  if (role === 'group')        return 'checkbox';
+  if (role === 'listbox')      return 'select';
+  if (tag === 'input') {
+    const type = (el.type || 'text').toLowerCase();
+    if (['text','search','password'].includes(type)) return 'text';
+    if (type === 'email')    return 'email';
+    if (type === 'tel')      return 'tel';
+    if (type === 'number')   return 'number';
+    if (type === 'url')      return 'url';
+    if (type === 'date')     return 'date';
+    if (type === 'checkbox') return 'checkbox';
+    if (type === 'radio')    return 'radio';
+    return type;
+  }
+  return 'unknown';
+}
+
+function buildFingerprint(domain, rawLabel, fieldType) {
+  const label = normalizeLabel(rawLabel);
+  if (!label) return '';
+  const d = (domain || 'unknown').toLowerCase().trim();
+  const t = (fieldType || 'text').toLowerCase().trim();
+  return `${d}::${label}::${t}`;
+}
+
+function extractLabelText(el) {
+  if (!el) return '';
+  const labelledBy = el.getAttribute('aria-labelledby');
+  if (labelledBy) {
+    const texts = labelledBy.trim().split(/\s+/)
+      .map(id => document.getElementById(id))
+      .filter(Boolean).map(n => n.textContent.trim()).filter(Boolean);
+    if (texts.length) return texts.join(' ');
+  }
+  const ariaLabel = el.getAttribute('aria-label');
+  if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
+  if (el.id) {
+    const lbl = document.querySelector(`label[for="${el.id}"]`);
+    if (lbl) return lbl.textContent.trim();
+  }
+  const parentLabel = el.closest('label');
+  if (parentLabel) {
+    const clone = parentLabel.cloneNode(true);
+    clone.querySelectorAll('input,select,textarea').forEach(n=>n.remove());
+    const t = clone.textContent.trim();
+    if (t) return t;
+  }
+  const ph = el.getAttribute('placeholder');
+  if (ph && ph.trim()) return ph.trim();
+  return el.name || el.id || '';
+}
+
+function fingerprintField(el, domain) {
+  const d          = domain || window.location.hostname;
+  const rawLabel   = extractLabelText(el);
+  const fieldType  = detectFieldType(el);
+  const label      = normalizeLabel(rawLabel);
+  const fingerprint = buildFingerprint(d, rawLabel, fieldType);
+  return { fingerprint, label, fieldType, rawLabel };
+}
+
+// ── Test helpers ─────────────────────────────────────────────────────────
+
+function row(tbody, n, col2, expected, got) {
+  const pass = got === expected;
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${n}</td>
+    <td class="raw">${escHtml(String(col2))}</td>
+    <td class="exp">${escHtml(String(expected))}</td>
+    <td class="got">${escHtml(String(got))}</td>
+    <td class="${pass?'pass':'fail'}">${pass?'✅ PASS':'❌ FAIL'}</td>`;
+  tbody.appendChild(tr);
+  return pass;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Section 1: normalizeLabel ────────────────────────────────────────────
+
+const NORMALIZE_CASES = [
+  // [raw,                                            expected]
+  ['Full Name *',                                    'full name'],
+  ['Email Address   (Write your correct Email) *',  'email address'],
+  ['Contact Number *',                               'contact number'],
+  ['  Phone (required)  ',                           'phone'],
+  ['What is your LinkedIn URL?',                     'what is your linkedin url?'],
+  ['',                                               ''],
+  [null,                                             ''],
+  [undefined,                                        ''],
+  ['   ',                                            ''],
+  ['First Name (optional) *',                        'first name'],
+  ['* Last Name *',                                  'last name'],
+  ['Date of Birth (DD/MM/YYYY) *',                  'date of birth'],
+  ['COLLEGE NAME *',                                 'college name'],
+  ['Skills / Technologies *',                        'skills / technologies'],
+];
+
+window.runNormalizeTests = () => {
+  const tbody = document.getElementById('normalize-body');
+  tbody.innerHTML = '';
+  let pass = 0;
+  NORMALIZE_CASES.forEach(([raw, expected], i) => {
+    const got = normalizeLabel(raw);
+    if (row(tbody, i+1, raw ?? 'null/undefined', expected, got)) pass++;
+  });
+  const total = NORMALIZE_CASES.length;
+  const el = document.getElementById('summary');
+  el.textContent = `${pass}/${total} passed`;
+  el.style.color = pass === total ? '#a6e3a1' : '#f38ba8';
+};
+
+// ── Section 2: buildFingerprint ──────────────────────────────────────────
+
+const FP_CASES = [
+  ['docs.google.com', 'Full Name *',        'text',     'docs.google.com::full name::text'],
+  ['docs.google.com', 'Email Address (Write Email) *', 'text', 'docs.google.com::email address::text'],
+  ['linkedin.com',    'Phone Number *',     'tel',      'linkedin.com::phone number::tel'],
+  ['forms.gle',       'Contact Number *',   'text',     'forms.gle::contact number::text'],
+  ['docs.google.com', '',                   'text',     ''],
+  ['docs.google.com', null,                 'text',     ''],
+  ['',                'Full Name',          'text',     'unknown::full name::text'],
+];
+
+window.runFingerprintTests = () => {
+  const tbody = document.getElementById('fp-body');
+  tbody.innerHTML = '';
+  FP_CASES.forEach(([domain, label, type, expected], i) => {
+    const got  = buildFingerprint(domain, label, type);
+    const desc = `${domain} / "${label}" / ${type}`;
+    row(tbody, i+1, desc, expected, got);
+  });
+};
+
+// ── Section 3: DOM fingerprinting ────────────────────────────────────────
+
+window.runDOMTests = () => {
+  const fields = [
+    document.getElementById('inp-name'),
+    document.getElementById('inp-email'),
+    document.getElementById('inp-tel'),
+    document.getElementById('inp-bio'),
+    document.getElementById('inp-country'),
+    document.getElementById('inp-radio'),
+  ];
+
+  const results = fields.map(el => {
+    const r = fingerprintField(el, 'test.local');
+    return {
+      element:     el.tagName.toLowerCase() + (el.id ? `#${el.id}` : ''),
+      rawLabel:    r.rawLabel,
+      label:       r.label,
+      fieldType:   r.fieldType,
+      fingerprint: r.fingerprint,
+      valid:       r.fingerprint !== '',
+    };
+  });
+
+  document.getElementById('dom-out').textContent = JSON.stringify(results, null, 2);
+
+  // Check all 6 have non-empty fingerprints
+  const allValid = results.every(r => r.valid);
+  document.getElementById('dom-out').style.color = allValid ? '#a6e3a1' : '#f38ba8';
+};
+
+// ── Section 4: Edge cases ────────────────────────────────────────────────
+
+const EDGE_CASES = [
+  [null,          ''],
+  [undefined,     ''],
+  ['',            ''],
+  ['   ',         ''],
+  ['* * *',       ''],
+  ['(required)',  ''],
+  ['नाम *',       'नाम'],   // Hindi unicode
+  ['Ñame *',      'ñame'],   // Spanish unicode
+  ['__name__',    'name'],   // underscores stripped if only at boundaries? No — only leading/trailing noise
+  ['123',         '123'],    // numeric label
+];
+
+window.runEdgeCases = () => {
+  const tbody = document.getElementById('edge-body');
+  tbody.innerHTML = '';
+  // edge cases — just display result, no strict expected (informational)
+  EDGE_CASES.forEach(([raw, expected], i) => {
+    const got = normalizeLabel(raw);
+    row(tbody, i+1, raw ?? 'null/undefined', expected, got);
+  });
+};
+
+</script>
+</body>
+</html>
