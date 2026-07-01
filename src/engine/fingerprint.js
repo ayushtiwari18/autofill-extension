@@ -21,17 +21,19 @@
  * Rules applied in order:
  *  1. Coerce to string, handle null/undefined → empty string
  *  2. Lowercase
- *  3. Strip trailing markers: *, (required), (optional), required, optional
- *  4. Strip full parenthetical clauses: (anything inside)
- *  5. Strip leading/trailing punctuation noise: : ; - _
- *  6. Collapse multiple whitespace → single space
- *  7. Trim
+ *  3. Strip (required) / (optional) word markers
+ *  4. Strip ALL parenthetical clauses: (anything inside)
+ *  5. Strip ALL asterisks (globally, handles "* * *" → "")
+ *  6. Strip leading/trailing punctuation noise: : ; - _
+ *  7. Collapse multiple whitespace → single space
+ *  8. Trim
  *
  * Examples:
  *  "Full Name *"                        → "full name"
  *  "Email Address   (Write your Email) *" → "email address"
  *  "Contact Number *"                   → "contact number"
  *  "  Phone (required)  "               → "phone"
+ *  "* * *"                              → ""
  *  "What is your LinkedIn URL?"         → "what is your linkedin url?"
  *  ""                                   → ""
  *  null / undefined                     → ""
@@ -47,26 +49,26 @@ export function normalizeLabel(rawLabel) {
   // Step 1 — lowercase
   s = s.toLowerCase();
 
-  // Step 2 — strip trailing required/optional markers (before or after *)
-  //  e.g. "name (required)", "name *", "name * (required)", "name(optional)"
+  // Step 2 — strip (required) / (optional) word markers anywhere in string
   s = s.replace(/\s*\(required\)\s*/gi, ' ');
   s = s.replace(/\s*\(optional\)\s*/gi, ' ');
   s = s.replace(/\brequired\b/gi, '');
-  s = s.replace(/\boptional\b/gi, '');
-  s = s.replace(/\s*\*\s*$/,      '');
-  s = s.replace(/^\s*\*\s*/,      '');
+  s = s.replace(/\boptional\b/gi,  '');
 
   // Step 3 — strip ALL parenthetical clauses: (anything)
-  //  e.g. "email address (write your correct email)"
+  //  e.g. "email address (write your correct email)" → "email address "
   s = s.replace(/\([^)]*\)/g, '');
 
-  // Step 4 — strip leading/trailing noise punctuation
+  // Step 4 — strip ALL asterisks globally (handles "* * *", "name *", "* name")
+  s = s.replace(/\*/g, '');
+
+  // Step 5 — strip leading/trailing punctuation noise: : ; - _
   s = s.replace(/^[:\-_;]+/, '').replace(/[:\-_;]+$/, '');
 
-  // Step 5 — collapse whitespace
+  // Step 6 — collapse whitespace
   s = s.replace(/\s+/g, ' ');
 
-  // Step 6 — trim
+  // Step 7 — trim
   s = s.trim();
 
   return s;
@@ -117,7 +119,7 @@ export function detectFieldType(el) {
     if (type === 'date')     return 'date';
     if (type === 'checkbox') return 'checkbox';
     if (type === 'radio')    return 'radio';
-    return type; // fallback: use whatever type attr says
+    return type;
   }
 
   return 'unknown';
@@ -159,7 +161,6 @@ export function buildFingerprint(domain, rawLabel, fieldType) {
 
 /**
  * Extract label text from a DOM field element using multiple strategies.
- * Same M1→M4 approach as the existing scanner, but standalone here.
  *
  * Strategies (in order):
  *  S1 — aria-labelledby → find referenced element text
@@ -200,7 +201,6 @@ export function extractLabelText(el) {
   // S4 — closest ancestor <label>
   const parentLabel = el.closest('label');
   if (parentLabel) {
-    // Clone to avoid including the input's own value
     const clone = parentLabel.cloneNode(true);
     clone.querySelectorAll('input,select,textarea').forEach(n => n.remove());
     const t = clone.textContent.trim();
@@ -226,10 +226,10 @@ export function extractLabelText(el) {
  *          Returns fingerprint='' if no usable label found.
  */
 export function fingerprintField(el, domain) {
-  const d         = domain || (typeof window !== 'undefined' ? window.location.hostname : 'unknown');
-  const rawLabel  = extractLabelText(el);
-  const fieldType = detectFieldType(el);
-  const label     = normalizeLabel(rawLabel);
+  const d          = domain || (typeof window !== 'undefined' ? window.location.hostname : 'unknown');
+  const rawLabel   = extractLabelText(el);
+  const fieldType  = detectFieldType(el);
+  const label      = normalizeLabel(rawLabel);
   const fingerprint = buildFingerprint(d, rawLabel, fieldType);
 
   return { fingerprint, label, fieldType, rawLabel };
