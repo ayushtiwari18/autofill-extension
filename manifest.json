@@ -32,6 +32,12 @@
       "all_frames": true
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/content/tooltip.css"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "icons": {
     "16": "public/icon16.png",
     "48": "public/icon48.png",
