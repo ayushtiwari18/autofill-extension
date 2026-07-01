@@ -9,8 +9,6 @@
     p.sub { color: #6c7086; margin-top: 0; }
     .card { background: #1e1e2e; border: 1px solid #313244; border-radius: 10px; padding: 20px 24px; margin: 16px 0; }
     .card h2 { margin: 0 0 14px; font-size: 1rem; color: #a6e3a1; }
-
-    /* Test table */
     table  { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
     th     { text-align: left; padding: 8px 10px; color: #89b4fa; border-bottom: 2px solid #313244; }
     td     { padding: 7px 10px; border-bottom: 1px solid #1e1e2e; vertical-align: top; }
@@ -20,8 +18,6 @@
     .raw   { color: #f9e2af; }
     .got   { color: #cdd6f4; }
     .exp   { color: #94e2d5; }
-
-    /* DOM field section */
     .fields { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; }
     .field-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 200px; }
     label  { font-size: 0.8rem; color: #6c7086; }
@@ -40,7 +36,6 @@
 <h1>🔬 Commit A2 — Fingerprint Engine Test</h1>
 <p class="sub">No extension needed. No build step. Open in any browser tab.</p>
 
-<!-- ── SECTION 1: normalizeLabel unit tests ─────────────────────────────── -->
 <div class="card">
   <h2>Section 1 — normalizeLabel() unit tests</h2>
   <p style="color:#6c7086;font-size:0.85rem;margin:0 0 12px">All rows must show ✅ PASS for Commit A2 to be complete.</p>
@@ -52,7 +47,6 @@
   </table>
 </div>
 
-<!-- ── SECTION 2: buildFingerprint unit tests ───────────────────────────── -->
 <div class="card">
   <h2>Section 2 — buildFingerprint() unit tests</h2>
   <button onclick="runFingerprintTests()">▶ Run All Fingerprint Tests</button>
@@ -62,44 +56,31 @@
   </table>
 </div>
 
-<!-- ── SECTION 3: DOM field extraction ─────────────────────────────────── -->
 <div class="card">
   <h2>Section 3 — DOM fingerprintField() on real elements</h2>
-  <p style="color:#6c7086;font-size:0.85rem;margin:0 0 12px">Hover or click a field below, then click "Fingerprint Focused Field".</p>
-
+  <p style="color:#6c7086;font-size:0.85rem;margin:0 0 12px">Click “Fingerprint All DOM Fields” to test all 6 field types.</p>
   <div class="fields">
-    <!-- text input with aria-labelledby -->
     <div class="field-wrap">
       <div id="lbl-name" style="font-size:.85rem;color:#cdd6f4">Full Name *</div>
       <input type="text" aria-labelledby="lbl-name" id="inp-name" placeholder="Your name" />
     </div>
-
-    <!-- email input with label[for] -->
     <div class="field-wrap">
       <label for="inp-email" style="color:#cdd6f4;font-size:.85rem">Email Address (Write your correct Email) *</label>
       <input type="email" id="inp-email" placeholder="you@example.com" />
     </div>
-
-    <!-- tel input with aria-label -->
     <div class="field-wrap">
       <input type="tel" aria-label="Contact Number *" placeholder="+91 XXXXX" id="inp-tel" />
     </div>
-
-    <!-- textarea with aria-labelledby -->
     <div class="field-wrap">
       <div id="lbl-bio" style="font-size:.85rem;color:#cdd6f4">Short Bio (optional)</div>
       <textarea aria-labelledby="lbl-bio" id="inp-bio" rows="2" placeholder="Tell us about yourself"></textarea>
     </div>
-
-    <!-- select with label[for] -->
     <div class="field-wrap">
       <label for="inp-country" style="color:#cdd6f4;font-size:.85rem">Country (required)</label>
       <select id="inp-country">
         <option>India</option><option>USA</option><option>UK</option>
       </select>
     </div>
-
-    <!-- Simulated Google Forms radio group -->
     <div class="field-wrap">
       <div id="lbl-gender" style="font-size:.85rem;color:#cdd6f4">Gender *</div>
       <div role="radiogroup" aria-labelledby="lbl-gender" id="inp-radio" style="display:flex;gap:10px;padding:8px 0">
@@ -109,13 +90,11 @@
       </div>
     </div>
   </div>
-
   <br/>
   <button onclick="runDOMTests()">▶ Fingerprint All DOM Fields</button>
   <pre id="dom-out">— click button above —</pre>
 </div>
 
-<!-- ── SECTION 4: Edge case stress tests ───────────────────────────────── -->
 <div class="card">
   <h2>Section 4 — Edge cases (null, empty, all-whitespace, unicode)</h2>
   <button onclick="runEdgeCases()">▶ Run Edge Cases</button>
@@ -127,20 +106,26 @@
 
 <script type="module">
 
-// ── Inline fingerprint.js (no build step needed for manual test) ──────────
+// ── Inline of src/engine/fingerprint.js ────────────────────────────────────────────
+// Keep in sync with src/engine/fingerprint.js
 
 function normalizeLabel(rawLabel) {
   if (rawLabel === null || rawLabel === undefined) return '';
   let s = String(rawLabel);
+  // Step 1 — lowercase
   s = s.toLowerCase();
+  // Step 2 — strip (required) / (optional) markers
   s = s.replace(/\s*\(required\)\s*/gi, ' ');
   s = s.replace(/\s*\(optional\)\s*/gi,  ' ');
   s = s.replace(/\brequired\b/gi, '');
-  s = s.replace(/\boptional\b/gi, '');
-  s = s.replace(/\s*\*\s*$/, '');
-  s = s.replace(/^\s*\*\s*/, '');
+  s = s.replace(/\boptional\b/gi,  '');
+  // Step 3 — strip all parenthetical clauses
   s = s.replace(/\([^)]*\)/g, '');
+  // Step 4 — strip ALL asterisks globally (fixes '* * *' → '')
+  s = s.replace(/\*/g, '');
+  // Step 5 — strip leading/trailing noise punctuation
   s = s.replace(/^[:\-_;]+/, '').replace(/[:\-_;]+$/, '');
+  // Step 6 — collapse whitespace + trim
   s = s.replace(/\s+/g, ' ');
   return s.trim();
 }
@@ -149,11 +134,11 @@ function detectFieldType(el) {
   if (!el || !el.tagName) return 'unknown';
   const tag  = el.tagName.toLowerCase();
   const role = (el.getAttribute('role') || '').toLowerCase();
-  if (tag === 'textarea')      return 'textarea';
-  if (tag === 'select')        return 'select';
-  if (role === 'radiogroup')   return 'radio';
-  if (role === 'group')        return 'checkbox';
-  if (role === 'listbox')      return 'select';
+  if (tag === 'textarea')    return 'textarea';
+  if (tag === 'select')      return 'select';
+  if (role === 'radiogroup') return 'radio';
+  if (role === 'group')      return 'checkbox';
+  if (role === 'listbox')    return 'select';
   if (tag === 'input') {
     const type = (el.type || 'text').toLowerCase();
     if (['text','search','password'].includes(type)) return 'text';
@@ -195,7 +180,7 @@ function extractLabelText(el) {
   const parentLabel = el.closest('label');
   if (parentLabel) {
     const clone = parentLabel.cloneNode(true);
-    clone.querySelectorAll('input,select,textarea').forEach(n=>n.remove());
+    clone.querySelectorAll('input,select,textarea').forEach(n => n.remove());
     const t = clone.textContent.trim();
     if (t) return t;
   }
@@ -205,15 +190,15 @@ function extractLabelText(el) {
 }
 
 function fingerprintField(el, domain) {
-  const d          = domain || window.location.hostname;
-  const rawLabel   = extractLabelText(el);
-  const fieldType  = detectFieldType(el);
-  const label      = normalizeLabel(rawLabel);
+  const d           = domain || window.location.hostname;
+  const rawLabel    = extractLabelText(el);
+  const fieldType   = detectFieldType(el);
+  const label       = normalizeLabel(rawLabel);
   const fingerprint = buildFingerprint(d, rawLabel, fieldType);
   return { fingerprint, label, fieldType, rawLabel };
 }
 
-// ── Test helpers ─────────────────────────────────────────────────────────
+// ── Test helpers ────────────────────────────────────────────────────────
 
 function row(tbody, n, col2, expected, got) {
   const pass = got === expected;
@@ -227,15 +212,13 @@ function row(tbody, n, col2, expected, got) {
   tbody.appendChild(tr);
   return pass;
 }
-
 function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ── Section 1: normalizeLabel ────────────────────────────────────────────
+// ── Section 1 ───────────────────────────────────────────────────────────
 
 const NORMALIZE_CASES = [
-  // [raw,                                            expected]
   ['Full Name *',                                    'full name'],
   ['Email Address   (Write your correct Email) *',  'email address'],
   ['Contact Number *',                               'contact number'],
@@ -266,16 +249,16 @@ window.runNormalizeTests = () => {
   el.style.color = pass === total ? '#a6e3a1' : '#f38ba8';
 };
 
-// ── Section 2: buildFingerprint ──────────────────────────────────────────
+// ── Section 2 ───────────────────────────────────────────────────────────
 
 const FP_CASES = [
-  ['docs.google.com', 'Full Name *',        'text',     'docs.google.com::full name::text'],
-  ['docs.google.com', 'Email Address (Write Email) *', 'text', 'docs.google.com::email address::text'],
-  ['linkedin.com',    'Phone Number *',     'tel',      'linkedin.com::phone number::tel'],
-  ['forms.gle',       'Contact Number *',   'text',     'forms.gle::contact number::text'],
-  ['docs.google.com', '',                   'text',     ''],
-  ['docs.google.com', null,                 'text',     ''],
-  ['',                'Full Name',          'text',     'unknown::full name::text'],
+  ['docs.google.com', 'Full Name *',                       'text',  'docs.google.com::full name::text'],
+  ['docs.google.com', 'Email Address (Write Email) *',     'text',  'docs.google.com::email address::text'],
+  ['linkedin.com',    'Phone Number *',                    'tel',   'linkedin.com::phone number::tel'],
+  ['forms.gle',       'Contact Number *',                  'text',  'forms.gle::contact number::text'],
+  ['docs.google.com', '',                                  'text',  ''],
+  ['docs.google.com', null,                                'text',  ''],
+  ['',                'Full Name',                         'text',  'unknown::full name::text'],
 ];
 
 window.runFingerprintTests = () => {
@@ -288,7 +271,7 @@ window.runFingerprintTests = () => {
   });
 };
 
-// ── Section 3: DOM fingerprinting ────────────────────────────────────────
+// ── Section 3 ───────────────────────────────────────────────────────────
 
 window.runDOMTests = () => {
   const fields = [
@@ -299,7 +282,6 @@ window.runDOMTests = () => {
     document.getElementById('inp-country'),
     document.getElementById('inp-radio'),
   ];
-
   const results = fields.map(el => {
     const r = fingerprintField(el, 'test.local');
     return {
@@ -311,33 +293,29 @@ window.runDOMTests = () => {
       valid:       r.fingerprint !== '',
     };
   });
-
   document.getElementById('dom-out').textContent = JSON.stringify(results, null, 2);
-
-  // Check all 6 have non-empty fingerprints
   const allValid = results.every(r => r.valid);
   document.getElementById('dom-out').style.color = allValid ? '#a6e3a1' : '#f38ba8';
 };
 
-// ── Section 4: Edge cases ────────────────────────────────────────────────
+// ── Section 4 ───────────────────────────────────────────────────────────
 
 const EDGE_CASES = [
-  [null,          ''],
-  [undefined,     ''],
-  ['',            ''],
-  ['   ',         ''],
-  ['* * *',       ''],
-  ['(required)',  ''],
-  ['नाम *',       'नाम'],   // Hindi unicode
-  ['Ñame *',      'ñame'],   // Spanish unicode
-  ['__name__',    'name'],   // underscores stripped if only at boundaries? No — only leading/trailing noise
-  ['123',         '123'],    // numeric label
+  [null,       ''],
+  [undefined,  ''],
+  ['',         ''],
+  ['   ',      ''],
+  ['* * *',    ''],    // ← THIS must now pass
+  ['(required)',''],
+  ['नाम *',    'नाम'],
+  ['Ñame *',     'ñame'],
+  ['__name__', 'name'],
+  ['123',      '123'],
 ];
 
 window.runEdgeCases = () => {
   const tbody = document.getElementById('edge-body');
   tbody.innerHTML = '';
-  // edge cases — just display result, no strict expected (informational)
   EDGE_CASES.forEach(([raw, expected], i) => {
     const got = normalizeLabel(raw);
     row(tbody, i+1, raw ?? 'null/undefined', expected, got);
