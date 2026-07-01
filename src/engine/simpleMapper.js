@@ -253,6 +253,7 @@ function matchField(field, innerProfile) {
           return {
             formFieldId:       field.id,
             formFieldSelector: field.selector,
+            formFieldIndex:    typeof field.selectorIndex === 'number' ? field.selectorIndex : 0,  // ← FIX: was missing
             formFieldLabel:    field.label || field.ariaLabel || field.placeholder || field.name,
             formFieldType:     field.type,
             profilePath:       rule.profilePath,
