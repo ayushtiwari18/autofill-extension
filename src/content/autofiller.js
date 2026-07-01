@@ -1,21 +1,25 @@
 /**
- * autofiller.js — SmartFill A6
- * Tooltip-first autofill on focus.
+ * autofiller.js — SmartFill A6 (debug build)
+ * Full lifecycle logging for focus → match → tooltip → fill.
  */
 
 import { matchFieldToProfile, loadProfile } from './profileMatcher.js';
 import { showTooltip, hideTooltip }         from './tooltip.js';
 
-const DOMAIN = window.location.hostname;
+const DOMAIN     = window.location.hostname;
+const IS_IFRAME  = window.self !== window.top;
+const FRAME_TYPE = IS_IFRAME ? 'IFRAME' : 'TOP';
 
-// Cache profile for the page lifetime
 let _profileCache = null;
 async function getProfile() {
-  if (!_profileCache) _profileCache = await loadProfile();
+  if (!_profileCache) {
+    console.log(`[Autofiller][${FRAME_TYPE}] loading profile from storage...`);
+    _profileCache = await loadProfile();
+    console.log(`[Autofiller][${FRAME_TYPE}] profile loaded:`, JSON.stringify(_profileCache).slice(0, 120));
+  }
   return _profileCache;
 }
 
-// React / Angular-safe value setter
 function nativeSet(el, value) {
   const proto = el.tagName === 'TEXTAREA'
     ? window.HTMLTextAreaElement.prototype
@@ -26,7 +30,6 @@ function nativeSet(el, value) {
   el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-// SmartFill ✓ badge (2.5s)
 function showBadge(el) {
   if (el.parentElement?.querySelector('.sf-badge')) return;
   const badge = document.createElement('span');
@@ -56,44 +59,53 @@ export function attachAutofiller(fieldInfo) {
   if (!el || _attached.has(el)) return;
   _attached.add(el);
 
+  console.log(`[Autofiller][${FRAME_TYPE}] attachAutofiller → label="${fieldInfo.label}" el=${el.tagName} on ${DOMAIN}`);
+
   el.addEventListener('focus', async () => {
-    if (el.value && el.value.trim() !== '') return;
+    console.log(`[Autofiller][${FRAME_TYPE}] FOCUS on label="${fieldInfo.label}" value="${el.value}"`);
 
-    const profile = await getProfile();
-    const value   = matchFieldToProfile(fieldInfo, profile);
-
-    if (!value) {
-      console.log(`[Autofiller] no profile match for label: "${fieldInfo.label}" on ${DOMAIN}`);
+    if (el.value && el.value.trim() !== '') {
+      console.log(`[Autofiller][${FRAME_TYPE}] field already filled — skipping`);
       return;
     }
 
-    // Check if field is visible enough for a tooltip
+    const profile = await getProfile();
+    console.log(`[Autofiller][${FRAME_TYPE}] matching label="${fieldInfo.label}" against profile...`);
+    const value = matchFieldToProfile(fieldInfo, profile);
+    console.log(`[Autofiller][${FRAME_TYPE}] match result → "${value}"`);
+
+    if (!value) {
+      console.warn(`[Autofiller][${FRAME_TYPE}] ⚠ no profile match for label="${fieldInfo.label}"`);
+      return;
+    }
+
     const rect = el.getBoundingClientRect();
     const visible = rect.width > 0 && rect.height > 0 &&
                     rect.top < window.innerHeight && rect.bottom > 0;
 
+    console.log(`[Autofiller][${FRAME_TYPE}] field visible=${visible} rect=${JSON.stringify({top:Math.round(rect.top),w:Math.round(rect.width),h:Math.round(rect.height)})}`);
+
     if (visible) {
-      // Show suggestion tooltip — user clicks to accept
+      console.log(`[Autofiller][${FRAME_TYPE}] showing tooltip for label="${fieldInfo.label}" value="${value}"`);
       showTooltip(el, { label: fieldInfo.label, value }, (accepted) => {
-        console.log(`[Autofiller] filled "${fieldInfo.label}" → "${accepted}" on ${DOMAIN}`);
+        console.log(`[Autofiller][${FRAME_TYPE}] ✅ filled "${fieldInfo.label}" → "${accepted}" on ${DOMAIN}`);
         nativeSet(el, accepted);
         showBadge(el);
       });
     } else {
-      // Offscreen field (e.g. in shadow DOM) — silent fill
-      console.log(`[Autofiller] filling (silent) "${fieldInfo.label}" → "${value}" on ${DOMAIN}`);
+      console.log(`[Autofiller][${FRAME_TYPE}] field offscreen — silent fill "${fieldInfo.label}" → "${value}"`);
       nativeSet(el, value);
     }
   });
 
-  // Hide tooltip when field loses focus (unless user is clicking the tip)
   el.addEventListener('blur', () => {
     setTimeout(() => hideTooltip(), 150);
   });
 }
 
 export function attachAllAutofillers(fields) {
+  console.log(`[Autofiller][${FRAME_TYPE}] attachAllAutofillers → ${fields.length} field(s)`);
   let count = 0;
   for (const f of fields) { attachAutofiller(f); count++; }
-  if (count > 0) console.log(`[Autofiller] attached to ${count} field(s) on ${DOMAIN}`);
+  if (count > 0) console.log(`[Autofiller][${FRAME_TYPE}] attached listeners to ${count} field(s)`);
 }
