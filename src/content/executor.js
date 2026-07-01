@@ -2,6 +2,11 @@
  * Autofill Executor - Phase 8
  * Key fix: use querySelectorAll[index] when selector matches multiple elements
  * (Google Forms uses jsname="YPqjbf" on ALL inputs)
+ *
+ * Fix (Issue 4): triggerEvents() now fires a proper InputEvent with data
+ * payload + KeyboardEvent pair, matching the same fix applied to
+ * autofiller.js nativeSet(). Bare Event('input') is not enough for
+ * Angular/Polymer-controlled inputs like Google Forms.
  */
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -12,7 +17,6 @@ function findElement(match) {
 
   if (formFieldSelector) {
     try {
-      // Always collect ALL matches first
       const all = document.querySelectorAll(formFieldSelector);
       console.log(`  ℹ querySelectorAll("${formFieldSelector}") → ${all.length} element(s)`);
 
@@ -27,7 +31,6 @@ function findElement(match) {
           console.log(`  ✔ Ambiguous selector — picked index [${formFieldIndex}]:`, el.outerHTML.slice(0, 120));
           return el;
         }
-        // fallback: return first
         console.warn(`  ⚠ Ambiguous selector but no index — falling back to [0]`);
         return all[0];
       }
@@ -87,6 +90,9 @@ function setValue(element, value) {
     }
 
     if (tag === 'input' || tag === 'textarea') {
+      // Step 1: activate the field so the framework initialises its model
+      element.focus();
+
       const proto = tag === 'textarea' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
       const desc = Object.getOwnPropertyDescriptor(proto, 'value');
       if (desc && desc.set) {
@@ -112,13 +118,43 @@ function setValue(element, value) {
   }
 }
 
+/**
+ * triggerEvents — fire the full event sequence needed for
+ * Angular/Polymer (Google Forms) to register a programmatic fill.
+ *
+ * Fix (Issue 4): replaced bare Event('input') with:
+ *   - InputEvent with data payload (Angular/Polymer listen to InputEvent.data)
+ *   - KeyboardEvent keydown+keyup pair (Google Forms model update is
+ *     gated on keyboard interaction)
+ *   - Event('change') to finalize
+ */
 function triggerEvents(element) {
   try {
-    ['focus', 'input', 'change', 'blur'].forEach(name => {
-      element.dispatchEvent(new Event(name, { bubbles: true, cancelable: true }));
+    const str = String(element.value || '');
+
+    // InputEvent with data payload — required for Angular/Polymer
+    element.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      cancelable: true,
+      data: str,
+      inputType: 'insertText',
+    }));
+
+    // Keyboard events — Google Forms gates model update on these
+    ['keydown', 'keyup'].forEach(evtName => {
+      element.dispatchEvent(new KeyboardEvent(evtName, {
+        bubbles: true,
+        cancelable: true,
+        key: str.slice(-1) || ' ',
+        code: 'KeyA',
+      }));
     });
-    element.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, data: element.value }));
-    console.log(`  ✔ Events fired: focus, input, change, blur + InputEvent`);
+
+    // change + blur to finalize
+    element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new Event('blur',   { bubbles: true, cancelable: true }));
+
+    console.log(`  ✔ Events fired: InputEvent(data), keydown, keyup, change, blur`);
   } catch (e) {
     console.error('[Executor] triggerEvents error:', e);
   }

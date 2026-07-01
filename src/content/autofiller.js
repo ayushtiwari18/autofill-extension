@@ -1,6 +1,15 @@
 /**
  * autofiller.js — SmartFill A6 (patched)
  * Full lifecycle logging for focus → match → tooltip → fill.
+ *
+ * Fix (Issue 2): nativeSet now fires a proper InputEvent with data
+ * payload + KeyboardEvent pair so Angular/Polymer (Google Forms)
+ * registers the programmatic value change in its internal model.
+ *
+ * Fix (Issue 3): el.focus() is called before nativeSet so Google
+ * Forms activates the field's internal model before we write to it.
+ * Without this the value is written to a dormant input that the
+ * framework ignores.
  */
 
 import { matchFieldToProfile, loadProfile } from './profileMatcher.js';
@@ -20,14 +29,56 @@ async function getProfile() {
   return _profileCache;
 }
 
+/**
+ * nativeSet — write a value into a framework-controlled input.
+ *
+ * Plain `el.value = x` is silently ignored by Angular/Polymer inputs
+ * (like Google Forms) because they hold the true value in their
+ * internal model. We must:
+ *   1. Call focus() so the framework activates the field.
+ *   2. Use the native HTMLInputElement setter to bypass any
+ *      framework override of the value property.
+ *   3. Fire an InputEvent (not a bare Event) with the data payload —
+ *      Angular/Polymer listen for InputEvent.data, not generic 'input'.
+ *   4. Fire a keydown+keyup pair — Google Forms' model update is
+ *      gated on keyboard interaction.
+ *   5. Fire 'change' to finalize.
+ */
 function nativeSet(el, value) {
+  const str = String(value);
   const proto = el.tagName === 'TEXTAREA'
     ? window.HTMLTextAreaElement.prototype
     : window.HTMLInputElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-  if (setter) setter.call(el, value); else el.value = value;
-  el.dispatchEvent(new Event('input',  { bubbles: true }));
+
+  // Step 1: activate the field so the framework initialises its model
+  el.focus();
+
+  // Step 2: write the value via the native setter
+  if (setter) setter.call(el, str); else el.value = str;
+
+  // Step 3: InputEvent with data payload (Angular/Polymer require this)
+  el.dispatchEvent(new InputEvent('input', {
+    bubbles: true,
+    cancelable: true,
+    data: str,
+    inputType: 'insertText',
+  }));
+
+  // Step 4: keyboard events — Google Forms gates model update on these
+  ['keydown', 'keyup'].forEach(evtName => {
+    el.dispatchEvent(new KeyboardEvent(evtName, {
+      bubbles: true,
+      cancelable: true,
+      key: str.slice(-1) || ' ',
+      code: 'KeyA',
+    }));
+  });
+
+  // Step 5: change event to finalize
   el.dispatchEvent(new Event('change', { bubbles: true }));
+
+  console.log(`[Autofiller][${FRAME_TYPE}] nativeSet complete → "${str}" on ${el.tagName}`);
 }
 
 function showBadge(el) {
@@ -98,8 +149,6 @@ export function attachAutofiller(fieldInfo) {
     }
   });
 
-  // Increased to 300ms so tooltip click can register before hide fires.
-  // tooltip.js also sets _pendingHide = false on mousedown to cancel the timer.
   el.addEventListener('blur', () => {
     setTimeout(() => hideTooltip(), 300);
   });

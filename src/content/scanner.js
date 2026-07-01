@@ -1,6 +1,9 @@
 /**
  * scanner.js — SmartFill A6 (debug + self-init)
  * Full lifecycle logging. Calls initScanner() immediately on load.
+ *
+ * Fix (Issue 1): domain is now forwarded to attachAllRecorders()
+ * so Recorder no longer logs "attached on undefined".
  */
 
 import { scanFields, observeNewFields } from './fieldScanner.js';
@@ -16,8 +19,6 @@ function injectTooltipStyles() {
   const link = document.createElement('link');
   link.id   = 'sf-tooltip-styles';
   link.rel  = 'stylesheet';
-  // tooltip.css is copied to dist/content/tooltip.css by CopyPlugin
-  // and declared in manifest web_accessible_resources as 'content/tooltip.css'
   link.href = chrome.runtime.getURL('content/tooltip.css');
   (document.head || document.documentElement).appendChild(link);
   console.log(`[SmartFill][${FRAME_TYPE}] tooltip.css injected`);
@@ -43,7 +44,9 @@ function initScanner(domain) {
     console.warn(`[SmartFill][${FRAME_TYPE}] ⚠ No fields on initial scan — MutationObserver will catch dynamic fields`);
   }
 
-  attachAllRecorders(initial);
+  // FIX (Issue 1): pass domain to attachAllRecorders so Recorder logs the
+  // correct hostname instead of "undefined".
+  attachAllRecorders(initial, d);
   attachAllAutofillers(initial);
 
   console.log(`[SmartFill][${FRAME_TYPE}] init complete — watching for new fields...`);
@@ -53,14 +56,12 @@ function initScanner(domain) {
     newFields.forEach((f, i) =>
       console.log(`[SmartFill][${FRAME_TYPE}]   newField[${i}] label="${f.label}" type=${f.fieldType}`)
     );
-    attachAllRecorders(newFields);
+    // FIX (Issue 1): also pass domain for newly discovered fields
+    attachAllRecorders(newFields, d);
     attachAllAutofillers(newFields);
   }, d);
 }
 
-// ─────────────────────────────────────────────────────────────────
-// SELF-INIT — runs immediately when content.js is injected by Chrome
-// ─────────────────────────────────────────────────────────────────
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => initScanner());
 } else {
