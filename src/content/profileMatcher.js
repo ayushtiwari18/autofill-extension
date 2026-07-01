@@ -1,23 +1,18 @@
 /**
  * profileMatcher.js — SmartFill profile loader
  * ─────────────────────────────────────────────────────────
- * FIXED: loadProfile() now reads from IndexedDB (idb.js) in production.
- * Previously this file imported from devData.js in both modes, meaning
- * the real profile saved by the user via ProfileForm was NEVER used.
+ * loadProfile() always reads from IndexedDB (idb.js).
+ * DEV_MODE / devData.js have been removed — IDB is the single source of
+ * truth in both development and production builds.
  *
- * Flow:
- *   DEV_MODE = true  → returns DEV_PROFILE.profile (fast, no IDB call)
- *   DEV_MODE = false → reads from idb.getProfile(), returns .profile subtree
- *
- * The returned value is always the INNER profile object
- * (profile.personal / .education / .experience / .links)
+ * The returned value is always the INNER profile object:
+ *   { personal: {...}, education: {...}, experience: {...}, links: {...} }
  * so simpleMapper.js get(p, 'personal', 'firstName') works directly.
  *
  * matchFieldToProfile() is kept for any legacy callers.
  */
 
 import { getProfile as idbGetProfile } from '../storage/idb.js';
-import { DEV_MODE, DEV_PROFILE }       from '../devData.js';
 
 // ── LABEL_MAP — kept for matchFieldToProfile() backwards compat ────────────
 const LABEL_MAP = [
@@ -64,7 +59,6 @@ const LABEL_MAP = [
 
 /**
  * flattenProfile — used only by matchFieldToProfile() for legacy callers.
- * Produces the old flat shape from the nested IDB record.
  */
 function flattenProfile(record) {
   if (!record) return {};
@@ -108,21 +102,11 @@ let _profileCache = null;
  * loadProfile()
  * ─────────────
  * Returns the INNER profile object (the .profile subtree).
- * This is what simpleMapper.js expects:
- *   { personal: {...}, education: {...}, experience: {...}, links: {...} }
- *
- * In DEV_MODE: returns DEV_PROFILE.profile instantly from memory.
- * In PROD:     reads from IndexedDB on first call, then caches.
+ * Reads from IndexedDB on first call, then caches for the page session.
  *
  * @returns {Promise<object>}
  */
 export async function loadProfile() {
-  // DEV shortcut — always returns hardcoded data, skips IDB entirely
-  if (DEV_MODE) {
-    return DEV_PROFILE.profile;
-  }
-
-  // Use cache after first IDB read (stays fresh for the page session)
   if (_profileCache) return _profileCache;
 
   try {
@@ -131,7 +115,6 @@ export async function loadProfile() {
       console.warn('[ProfileMatcher] No profile in IDB — user needs to set up profile');
       return {};
     }
-    // Return the inner subtree so simpleMapper.js traversal works
     _profileCache = record.profile || record;
     console.log('[ProfileMatcher] Profile loaded from IDB — keys:', Object.keys(_profileCache));
     return _profileCache;
@@ -153,7 +136,6 @@ export function invalidateProfileCache() {
 
 /**
  * matchFieldToProfile() — legacy helper kept for backwards compat.
- * Used by any code that still does a direct label → value lookup.
  *
  * @param {string} label    — normalised field label
  * @param {object} record   — full IDB record (with .profile wrapper)

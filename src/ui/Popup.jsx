@@ -1,19 +1,15 @@
 /**
  * Popup.jsx — SmartFill root component
  * ─────────────────────────────────────────────────────────
- * FIXED: init() now loads profile from IDB via profileStore.loadProfile()
- * (which itself delegates to idb.js).
- * Previously in DEV_MODE it short-circuited to devData.js, and in PROD
- * it also called profileStore.loadProfile() but that used chrome.storage.
- * Now both DEV and PROD go through the same unified IDB path
- * (DEV_MODE just skips the IDB call for speed during development).
+ * Profile is always loaded from IndexedDB via profileStore.loadProfile().
+ * DEV_MODE / devData.js have been removed — IDB is the single source of
+ * truth in both development and production builds.
  */
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import Dashboard    from './Dashboard.jsx';
 import ProfileForm  from './ProfileForm.jsx';
 import Review       from './Review.jsx';
 import { loadProfile, hasProfile } from '../storage/profileStore.js';
-import { DEV_MODE, DEV_PROFILE }   from '../devData.js';
 import './styles.css';
 
 export const AppContext = createContext();
@@ -34,15 +30,6 @@ function Popup() {
 
   const init = async () => {
     try {
-      // ── DEV MODE: use hardcoded devData profile, skip IDB ───────────────
-      if (DEV_MODE) {
-        console.log('[Popup] DEV_MODE — using devData.js profile');
-        setProfile(DEV_PROFILE);
-        setCurrentScreen('dashboard');
-        return;
-      }
-
-      // ── PROD: load from IndexedDB via profileStore ───────────────────
       const stored = await loadProfile();
       if (stored) {
         console.log('[Popup] Profile loaded from IDB');
@@ -101,11 +88,6 @@ function Popup() {
       <div className="popup-container">
         <header className="header">
           <h1>⚡ SmartFill</h1>
-          {DEV_MODE && (
-            <div style={{ fontSize: '10px', color: '#ff9800', textAlign: 'center' }}>
-              DEV MODE — using devData.js
-            </div>
-          )}
         </header>
         <main>
           {error && (
