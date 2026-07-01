@@ -6,31 +6,17 @@
 
 import { executeAutofill } from './executor.js';
 
-// ============================================
-// CONSTANTS
-// ============================================
-const SCAN_DELAY_MS = 500; // Debounce delay for MutationObserver
-const MAX_RESCANS = 3; // Maximum re-scans per page
-const FORM_FIELD_SELECTORS = 'input:not([type="submit"]):not([type="button"]), textarea, select';
+const SCAN_DELAY_MS = 500;
+const MAX_RESCANS = 3;
+const FORM_FIELD_SELECTORS = 'input:not([type="submit"]):not([type="button"]):not([type="hidden"]), textarea, select';
 
-// ============================================
-// STATE
-// ============================================
 let scanCount = 0;
 let mutationObserver = null;
 
-// ============================================
-// UTILITY FUNCTIONS
-// ============================================
+// ── Utilities ────────────────────────────────────────────────────────────────
 
-/**
- * Check if element is visible to user
- * @param {HTMLElement} element - Element to check
- * @returns {boolean} - true if visible
- */
 function isElementVisible(element) {
   if (!element) return false;
-  
   const style = window.getComputedStyle(element);
   return (
     style.display !== 'none' &&
@@ -41,309 +27,228 @@ function isElementVisible(element) {
   );
 }
 
-/**
- * Check if input is a button or submit type
- * @param {HTMLInputElement} input - Input element
- * @returns {boolean} - true if button/submit
- */
 function isButtonOrSubmit(input) {
-  const type = input.type ? input.type.toLowerCase() : '';
-  return type === 'submit' || type === 'button' || type === 'reset' || type === 'image';
+  const type = (input.type || '').toLowerCase();
+  return ['submit', 'button', 'reset', 'image', 'hidden'].includes(type);
 }
 
-/**
- * Generate unique ID for element
- * @param {string} prefix - ID prefix
- * @returns {string} - Unique ID
- */
 function generateUniqueId(prefix = 'field') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-/**
- * Debounce function to limit execution rate
- * @param {Function} func - Function to debounce
- * @param {number} wait - Wait time in ms
- * @returns {Function} - Debounced function
- */
 function debounce(func, wait) {
   let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
+  return function (...args) {
     clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
+    timeout = setTimeout(() => func(...args), wait);
   };
 }
 
-/**
- * Check if page is ready for scanning
- * @returns {Promise<boolean>} - Resolves when page is ready
- */
 function isPageReady() {
-  return new Promise((resolve) => {
-    if (document.readyState === 'complete') {
-      resolve(true);
-    } else {
-      window.addEventListener('load', () => resolve(true), { once: true });
-    }
+  return new Promise(resolve => {
+    if (document.readyState === 'complete') resolve(true);
+    else window.addEventListener('load', () => resolve(true), { once: true });
   });
 }
 
-/**
- * Sanitize string for use in CSS selector
- * @param {string} str - String to sanitize
- * @returns {string} - Sanitized string
- */
 function sanitizeSelectorString(str) {
-  if (!str) return '';
-  // Escape special characters for CSS selectors
-  return str.replace(/(["'\\])/g, '\\$1');
+  return (str || '').replace(/(["'\\])/g, '\\$1');
 }
 
-// ============================================
-// FORM DETECTION FUNCTIONS
-// ============================================
+// ── Form Detection ────────────────────────────────────────────────────────────
 
-/**
- * Detect all visible forms on the page
- * @returns {HTMLFormElement[]} - Array of form elements
- */
 function detectForms() {
-  const allForms = document.querySelectorAll('form');
-  const visibleForms = [];
-  
-  allForms.forEach(form => {
-    if (isElementVisible(form)) {
-      visibleForms.push(form);
-    }
+  const visible = [];
+  document.querySelectorAll('form').forEach(f => { if (isElementVisible(f)) visible.push(f); });
+  // Google Forms iframes (embedded on other pages)
+  document.querySelectorAll('iframe').forEach(iframe => {
+    if (isElementVisible(iframe) && (iframe.src || '').includes('docs.google.com/forms'))
+      visible.push(iframe);
   });
-  
-  // Also check for Google Forms iframes
-  const iframes = document.querySelectorAll('iframe');
-  iframes.forEach(iframe => {
-    if (isElementVisible(iframe) && isGoogleFormsIframe(iframe)) {
-      visibleForms.push(iframe);
-    }
-  });
-  
-  return visibleForms;
+  return visible;
 }
 
-/**
- * Check if iframe is a Google Form
- * @param {HTMLIFrameElement} iframe - Iframe element
- * @returns {boolean} - true if Google Forms iframe
- */
-function isGoogleFormsIframe(iframe) {
-  const src = iframe.src || '';
-  return src.includes('docs.google.com/forms');
-}
-
-/**
- * Identify the type of form
- * @param {HTMLElement} formElement - Form to identify
- * @returns {string} - "google-forms" | "generic" | "unknown"
- */
 function identifyFormType(formElement) {
-  // Check if it's an iframe (Google Forms)
-  if (formElement.tagName === 'IFRAME') {
-    if (isGoogleFormsIframe(formElement)) {
-      return 'google-forms';
-    }
-    return 'unknown';
-  }
-  
-  // Check for Google Forms indicators in the form element
-  if (formElement.classList && formElement.classList.contains('freebirdForm')) {
-    return 'google-forms';
-  }
-  
-  // Check for Google Forms data attributes
-  if (formElement.hasAttribute('data-freebird-form-id')) {
-    return 'google-forms';
-  }
-  
-  // Default to generic HTML form
+  if (formElement.tagName === 'IFRAME') return 'google-forms';
+  // Google Forms direct page — has freebirdForm class or data attribute
+  if (formElement.classList && (
+    formElement.classList.contains('freebirdFormviewerViewFormCard') ||
+    formElement.classList.contains('freebirdForm')
+  )) return 'google-forms';
+  // URL-based detection (direct Google Forms page)
+  if (window.location.hostname === 'docs.google.com' &&
+      window.location.pathname.includes('/forms/')) return 'google-forms';
   return 'generic';
 }
 
-/**
- * Detect if form contains CAPTCHA
- * @param {HTMLElement} formElement - Form to check
- * @returns {boolean} - true if CAPTCHA detected
- */
 function detectCaptcha(formElement) {
-  // Check for reCAPTCHA
-  if (formElement.querySelector('.g-recaptcha') || 
-      formElement.querySelector('iframe[src*="recaptcha"]')) {
-    return true;
-  }
-  
-  // Check for hCaptcha
-  if (formElement.querySelector('.h-captcha') || 
-      formElement.querySelector('iframe[src*="hcaptcha"]')) {
-    return true;
-  }
-  
-  // Check for CAPTCHA keywords in text content
-  const formText = formElement.textContent.toLowerCase();
-  if (formText.includes('captcha') || 
-      formText.includes('recaptcha') || 
-      formText.includes('hcaptcha')) {
-    return true;
-  }
-  
-  return false;
+  return !!(formElement.querySelector('.g-recaptcha, .h-captcha, iframe[src*="recaptcha"], iframe[src*="hcaptcha"]'));
 }
 
-// ============================================
-// FIELD METADATA EXTRACTION
-// ============================================
+// ── Label Extraction ──────────────────────────────────────────────────────────
 
 /**
- * Find label associated with input field
- * @param {HTMLInputElement} inputElement - Input element
- * @returns {string|null} - Label text or null
+ * Google Forms question title CSS classes (varies by GForms version)
+ * We try all of them.
  */
+const GFORMS_TITLE_CLASSES = [
+  'freebirdFormviewerComponentsQuestionBaseTitle',
+  'exportItemTitle',
+  'freebirdFormviewerViewItemsItemItemTitle',
+  'M7eMe',   // older GForms
+  'HoXoMd',  // newer GForms question text wrapper
+];
+
 function findAssociatedLabel(inputElement) {
   try {
-    // Method 1: <label for="input-id">Text</label>
+    // ── Method 1: <label for="id"> ──────────────────────────────────────────
     if (inputElement.id) {
       const label = document.querySelector(`label[for="${sanitizeSelectorString(inputElement.id)}"]`);
-      if (label) return label.textContent.trim();
+      if (label) {
+        const text = label.textContent.trim();
+        if (text) return text;
+      }
     }
-    
-    // Method 2: <label><input></label>
+
+    // ── Method 2: <label><input></label> ────────────────────────────────────
     const parentLabel = inputElement.closest('label');
-    if (parentLabel) return parentLabel.textContent.trim();
-    
-    // Method 3: aria-labelledby
+    if (parentLabel) {
+      const text = parentLabel.textContent.trim();
+      if (text) return text;
+    }
+
+    // ── Method 3: aria-label attribute directly on input ────────────────────
+    const ariaLabel = inputElement.getAttribute('aria-label');
+    if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
+
+    // ── Method 4: aria-labelledby (single OR space-separated multiple IDs) ──
+    // Google Forms uses space-separated: aria-labelledby="id1 id2 id3"
     const labelledBy = inputElement.getAttribute('aria-labelledby');
     if (labelledBy) {
-      const labelElement = document.getElementById(labelledBy);
-      if (labelElement) return labelElement.textContent.trim();
+      const ids = labelledBy.trim().split(/\s+/);
+      const texts = ids
+        .map(id => document.getElementById(id))
+        .filter(Boolean)
+        .map(el => el.textContent.trim())
+        .filter(t => t.length > 0);
+      if (texts.length > 0) return texts[0]; // first id is usually the question
     }
-    
+
+    // ── Method 5: Walk up DOM looking for Google Forms title div ────────────
+    let ancestor = inputElement.parentElement;
+    for (let depth = 0; depth < 12 && ancestor; depth++) {
+      for (const cls of GFORMS_TITLE_CLASSES) {
+        const titleEl = ancestor.querySelector('.' + cls);
+        if (titleEl) {
+          const text = titleEl.textContent.trim();
+          if (text) return text;
+        }
+      }
+      ancestor = ancestor.parentElement;
+    }
+
+    // ── Method 6: Walk up DOM, find first sibling/cousin div with text ───────
+    // Generic fallback: go up 5 levels, look for a non-empty div/span
+    // that precedes the input's container and looks like a label
+    let container = inputElement.parentElement;
+    for (let depth = 0; depth < 6 && container; depth++) {
+      const prev = container.previousElementSibling;
+      if (prev) {
+        const text = prev.textContent.trim();
+        // Ignore very long text (probably page content, not a label)
+        if (text && text.length > 0 && text.length < 120) return text;
+      }
+      container = container.parentElement;
+    }
+
     return null;
   } catch (error) {
-    console.error('[Autofill Scanner] Error finding label:', error.message);
+    console.error('[Scanner] findAssociatedLabel error:', error.message);
     return null;
   }
 }
 
-/**
- * Generate CSS selector for element
- * @param {HTMLElement} element - Element to target
- * @returns {string} - CSS selector
- */
+// ── CSS Selector Generation ───────────────────────────────────────────────────
+
 function generateCSSSelector(element) {
   try {
-    // Priority 1: ID
-    if (element.id) {
-      return `#${sanitizeSelectorString(element.id)}`;
-    }
-    
-    // Priority 2: Name attribute
-    if (element.name) {
-      const tagName = element.tagName.toLowerCase();
-      return `${tagName}[name="${sanitizeSelectorString(element.name)}"]`;
-    }
-    
-    // Priority 3: Generate path-based selector
+    if (element.id) return `#${sanitizeSelectorString(element.id)}`;
+    if (element.name) return `${element.tagName.toLowerCase()}[name="${sanitizeSelectorString(element.name)}"]`;
+    // Google Forms: use jsname or data-initial-value as selector hook
+    const jsname = element.getAttribute('jsname');
+    if (jsname) return `${element.tagName.toLowerCase()}[jsname="${jsname}"]`;
+
+    // Path-based fallback
     const path = [];
     let current = element;
-    
     while (current && current.nodeType === Node.ELEMENT_NODE && current !== document.body) {
-      let selector = current.tagName.toLowerCase();
-      
-      // Add nth-child if multiple siblings
+      let sel = current.tagName.toLowerCase();
       const parent = current.parentElement;
       if (parent) {
         const siblings = Array.from(parent.children);
-        if (siblings.length > 1) {
-          const index = siblings.indexOf(current) + 1;
-          selector += `:nth-child(${index})`;
-        }
+        if (siblings.length > 1) sel += `:nth-child(${siblings.indexOf(current) + 1})`;
       }
-      
-      path.unshift(selector);
+      path.unshift(sel);
       current = current.parentElement;
     }
-    
     return path.join(' > ');
-  } catch (error) {
-    console.error('[Autofill Scanner] Error generating selector:', error.message);
+  } catch (e) {
     return '';
   }
 }
 
-/**
- * Extract metadata from input field
- * @param {HTMLInputElement} inputElement - Input field
- * @returns {Object} - Field metadata object
- */
+// ── Field Metadata Extraction ─────────────────────────────────────────────────
+
 function extractFieldMetadata(inputElement) {
   try {
-    return {
+    const label = findAssociatedLabel(inputElement);
+    const ariaLabel = inputElement.getAttribute('aria-label') || null;
+    const meta = {
       id: inputElement.id || generateUniqueId('field'),
       name: inputElement.name || '',
       type: inputElement.type || 'text',
-      label: findAssociatedLabel(inputElement),
+      label,
       placeholder: inputElement.placeholder || '',
-      ariaLabel: inputElement.getAttribute('aria-label') || null,
+      ariaLabel,
       required: inputElement.required || inputElement.hasAttribute('required'),
-      value: '', // NEVER read actual value (privacy requirement)
+      value: '',
       selector: generateCSSSelector(inputElement)
     };
-  } catch (error) {
-    console.error('[Autofill Scanner] Error extracting field metadata:', error.message);
+    console.log('[Scanner] Field extracted:', {
+      label: meta.label,
+      name: meta.name,
+      placeholder: meta.placeholder,
+      ariaLabel: meta.ariaLabel,
+      type: meta.type,
+      selector: meta.selector
+    });
+    return meta;
+  } catch (e) {
+    console.error('[Scanner] extractFieldMetadata error:', e.message);
     return null;
   }
 }
 
-// ============================================
-// FORM SCANNING
-// ============================================
+// ── Form Scanning ─────────────────────────────────────────────────────────────
 
-/**
- * Scan a single form and extract all metadata
- * @param {HTMLFormElement} formElement - Form to scan
- * @returns {Object} - Form data object
- */
 function scanForm(formElement) {
   try {
     const formId = formElement.id || generateUniqueId('form');
     const formType = identifyFormType(formElement);
     const hasCaptcha = detectCaptcha(formElement);
-    
-    // For Google Forms iframes, can't access internal fields
+
     if (formType === 'google-forms' && formElement.tagName === 'IFRAME') {
-      return {
-        id: formId,
-        type: formType,
-        hasCaptcha,
-        fields: [], // Cannot access iframe content
-        action: formElement.src || '',
-        method: 'unknown'
-      };
+      return { id: formId, type: formType, hasCaptcha, fields: [], action: formElement.src || '', method: 'unknown' };
     }
-    
-    // Find all input fields
+
     const fields = [];
-    const inputs = formElement.querySelectorAll(FORM_FIELD_SELECTORS);
-    
-    inputs.forEach(input => {
+    formElement.querySelectorAll(FORM_FIELD_SELECTORS).forEach(input => {
       if (isElementVisible(input) && !isButtonOrSubmit(input)) {
-        const fieldMetadata = extractFieldMetadata(input);
-        if (fieldMetadata) {
-          fields.push(fieldMetadata);
-        }
+        const meta = extractFieldMetadata(input);
+        if (meta) fields.push(meta);
       }
     });
-    
+
     return {
       id: formId,
       type: formType,
@@ -352,205 +257,105 @@ function scanForm(formElement) {
       action: formElement.action || '',
       method: (formElement.method || 'GET').toUpperCase()
     };
-  } catch (error) {
-    console.error('[Autofill Scanner] Error scanning form:', error.message);
+  } catch (e) {
+    console.error('[Scanner] scanForm error:', e.message);
     return null;
   }
 }
 
-/**
- * Scan entire page for forms
- * @returns {Object} - Page scan result
- */
 function scanPage() {
   try {
     const forms = detectForms();
     const scannedForms = [];
-    
     forms.forEach(form => {
-      const formData = scanForm(form);
-      if (formData && (formData.fields.length > 0 || formData.type === 'google-forms')) {
-        scannedForms.push(formData);
-      }
+      const data = scanForm(form);
+      if (data && (data.fields.length > 0 || data.type === 'google-forms'))
+        scannedForms.push(data);
     });
-    
-    return {
-      url: window.location.href,
-      title: document.title,
-      forms: scannedForms,
-      scannedAt: new Date().toISOString()
-    };
-  } catch (error) {
-    console.error('[Autofill Scanner] Error scanning page:', error.message);
-    return {
-      url: window.location.href,
-      title: document.title,
-      forms: [],
-      scannedAt: new Date().toISOString()
-    };
+    return { url: window.location.href, title: document.title, forms: scannedForms, scannedAt: new Date().toISOString() };
+  } catch (e) {
+    return { url: window.location.href, title: document.title, forms: [], scannedAt: new Date().toISOString() };
   }
 }
 
-// ============================================
-// COMMUNICATION
-// ============================================
+// ── Communication ─────────────────────────────────────────────────────────────
 
-/**
- * Send scan results to background script
- * @param {Object} pageData - Scanned page data
- * @returns {Promise<void>}
- */
 function sendFormDataToBackground(pageData) {
   try {
-    if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime.sendMessage({
-        type: 'FORM_DATA_SCANNED',
-        data: pageData
-      });
-    }
-  } catch (error) {
-    console.error('[Autofill Scanner] Error sending data to background:', error.message);
+    chrome.runtime.sendMessage({ type: 'FORM_DATA_SCANNED', data: pageData });
+  } catch (e) {
+    console.error('[Scanner] sendFormDataToBackground error:', e.message);
   }
 }
 
-/**
- * Handle AUTOFILL message from popup
- * @param {Object} message - Message with matches array
- * @param {Function} sendResponse - Response callback
- */
 function handleAutofillMessage(message, sendResponse) {
   try {
-    console.log('[Scanner] Executing autofill for', message.matches.length, 'fields');
-    
-    // Execute autofill
     const results = executeAutofill(message.matches);
-    
-    // Send success response
-    sendResponse({
-      success: true,
-      results: results
-    });
-    
-  } catch (error) {
-    console.error('[Scanner] Autofill error:', error);
-    
-    // Send error response
-    sendResponse({
-      success: false,
-      error: error.message
-    });
+    sendResponse({ success: true, results });
+  } catch (e) {
+    sendResponse({ success: false, error: e.message });
   }
 }
 
-/**
- * Message listener for popup communication
- */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('[Scanner] Received message:', message.action);
-  
   switch (message.action) {
     case 'AUTOFILL':
       handleAutofillMessage(message, sendResponse);
-      return true; // Keep channel open for async response
-      
-    case 'SCAN_PAGE':
-      // Manual scan request from popup
+      return true;
+    case 'SCAN_PAGE': {
       const pageData = scanPage();
       sendFormDataToBackground(pageData);
       sendResponse({ success: true, data: pageData });
       return true;
-      
+    }
     default:
-      console.log('[Scanner] Unknown action:', message.action);
       sendResponse({ success: false, error: 'Unknown action' });
   }
-  
   return false;
 });
 
-// ============================================
-// MUTATION OBSERVER
-// ============================================
+// ── MutationObserver ──────────────────────────────────────────────────────────
 
-/**
- * Handle DOM mutations (debounced)
- */
 const handleMutations = debounce(() => {
   if (scanCount < MAX_RESCANS) {
     scanCount++;
-    console.log(`[Autofill Scanner] Re-scanning page (${scanCount}/${MAX_RESCANS})`);
     const pageData = scanPage();
     sendFormDataToBackground(pageData);
   } else {
-    console.log('[Autofill Scanner] Max re-scans reached, disconnecting observer');
-    if (mutationObserver) {
-      mutationObserver.disconnect();
-    }
+    if (mutationObserver) mutationObserver.disconnect();
   }
 }, SCAN_DELAY_MS);
 
-/**
- * Watch for dynamic form additions/changes
- * @returns {MutationObserver} - Observer instance
- */
 function observeDOMChanges() {
   try {
-    const observer = new MutationObserver((mutations) => {
-      // Check if forms were added
-      const formsAdded = mutations.some(mutation => {
-        return Array.from(mutation.addedNodes).some(node => {
-          if (node.nodeType !== Node.ELEMENT_NODE) return false;
-          return node.nodeName === 'FORM' || 
-                 (node.querySelectorAll && node.querySelectorAll('form').length > 0);
-        });
-      });
-      
-      if (formsAdded) {
-        handleMutations();
-      }
+    const observer = new MutationObserver(mutations => {
+      const formsAdded = mutations.some(m =>
+        Array.from(m.addedNodes).some(n =>
+          n.nodeType === Node.ELEMENT_NODE &&
+          (n.nodeName === 'FORM' || (n.querySelectorAll && n.querySelectorAll('form').length > 0))
+        )
+      );
+      if (formsAdded) handleMutations();
     });
-    
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-    
+    observer.observe(document.body, { childList: true, subtree: true });
     return observer;
-  } catch (error) {
-    console.error('[Autofill Scanner] Error setting up MutationObserver:', error.message);
+  } catch (e) {
     return null;
   }
 }
 
-// ============================================
-// INITIALIZATION
-// ============================================
+// ── Init ──────────────────────────────────────────────────────────────────────
 
-/**
- * Initialize scanner on page load
- */
 async function init() {
   try {
-    console.log('[Autofill Scanner] Initializing...');
-    
-    // Wait for page to be ready
     await isPageReady();
-    
-    // Perform initial scan
     const pageData = scanPage();
-    console.log(`[Autofill Scanner] Found ${pageData.forms.length} form(s)`);
-    
-    // Send results to background
     sendFormDataToBackground(pageData);
-    
-    // Set up observer for dynamic content
     mutationObserver = observeDOMChanges();
-    
     console.log('[Autofill Scanner] Initialization complete - Phase 7');
-  } catch (error) {
-    console.error('[Autofill Scanner] Initialization error:', error.message);
+  } catch (e) {
+    console.error('[Scanner] Init error:', e.message);
   }
 }
 
-// Start scanner when script loads
 init();
