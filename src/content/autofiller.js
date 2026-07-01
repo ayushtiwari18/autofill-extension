@@ -9,26 +9,20 @@
  *         → confidence >= 0.55 → showTooltip → onAccept → fillElementDirectly
  *         → confidence < 0.55 or 0 matches → try simpleMapper fallback
  *
- * Bug fixes from A7 patch are all preserved:
- *   Bug1: fieldInfo.type aliased from fieldScanner.js ✓
- *   Bug2: fieldInfo.selector built by fieldScanner.js ✓
- *   Bug3: direct fill via fillElementDirectly, no re-discovery ✓
+ * FIX: removed dead import of executeAutofill (was imported but never used).
  */
 
 import { loadProfile as loadProfileFromMatcher }  from './profileMatcher.js';
 import { showTooltip, hideTooltip }                from './tooltip.js';
 import { mapProfileToForm }                        from '../engine/mapper.js';       // PRIMARY
 import { simpleMapProfileToForm }                  from '../engine/simpleMapper.js'; // FALLBACK
-import { executeAutofill }                         from './executor.js';
 
 const DOMAIN     = window.location.hostname;
 const IS_IFRAME  = window.self !== window.top;
 const FRAME_TYPE = IS_IFRAME ? 'IFRAME' : 'TOP';
 
-// Minimum confidence to show tooltip / fill (below this → fallback to simpleMapper)
 const CONFIDENCE_THRESHOLD = 0.55;
 
-// ── Profile cache ────────────────────────────────────────────────────────────
 let _profileCache = null;
 async function getProfile() {
   if (!_profileCache) {
@@ -40,7 +34,6 @@ async function getProfile() {
   return _profileCache;
 }
 
-// ── Google Forms custom SELECT handler ───────────────────────────────────────
 function handleSelectFill(el, value) {
   if (el.tagName === 'SELECT') {
     const opt = Array.from(el.options).find(o =>
@@ -84,7 +77,6 @@ function handleSelectFill(el, value) {
   return false;
 }
 
-// ── Badge ─────────────────────────────────────────────────────────────────────
 function showBadge(el) {
   if (el.parentElement?.querySelector('.sf-badge')) return;
   const badge = document.createElement('span');
@@ -107,8 +99,6 @@ function showBadge(el) {
   setTimeout(() => badge.remove(), 2500);
 }
 
-// ── Direct fill helper ────────────────────────────────────────────────────────
-// Writes to an element we already hold — no re-discovery via selector needed.
 function fillElementDirectly(el, value) {
   const str = String(value);
   const tag  = el.tagName.toLowerCase();
@@ -142,7 +132,6 @@ function fillElementDirectly(el, value) {
   }
 }
 
-// ── Build minimal formData for a single field ─────────────────────────────────
 function buildSingleFieldFormData(fieldInfo, el) {
   return {
     url: window.location.href,
@@ -164,17 +153,14 @@ function buildSingleFieldFormData(fieldInfo, el) {
   };
 }
 
-// ── Core: run the full match → fill pipeline for one field ───────────────────
 async function runAutofill(fieldInfo, el) {
   const rawProfile  = await getProfile();
   const formData    = buildSingleFieldFormData(fieldInfo, el);
 
-  // Normalise profile: simpleMapper needs the INNER object (.personal / .education / ...)
   const innerProfile = rawProfile?.personal
     ? rawProfile
     : (rawProfile?.profile || rawProfile);
 
-  // ── PRIMARY: fuzzy mapper ─────────────────────────────────────────────────
   console.log(`[Autofiller][${FRAME_TYPE}] mapper.js running for label="${fieldInfo.label}"`);
   const fuzzyResult = mapProfileToForm(innerProfile, formData);
   console.log(`[Autofiller][${FRAME_TYPE}] mapper result: ${
@@ -188,18 +174,15 @@ async function runAutofill(fieldInfo, el) {
         `confidence=${match.confidence.toFixed(3)}`);
       return match;
     }
-    console.log(`[Autofiller][${FRAME_TYPE}] ⚠ fuzzy match below threshold ` +
-      `(${match.confidence.toFixed(3)} < ${CONFIDENCE_THRESHOLD}) — trying fallback`);
+    console.log(`[Autofiller][${FRAME_TYPE}] ⚠ fuzzy match below threshold — trying fallback`);
   }
 
-  // ── FALLBACK: keyword mapper ──────────────────────────────────────────────
   console.log(`[Autofiller][${FRAME_TYPE}] simpleMapper fallback for label="${fieldInfo.label}"`);
   const simpleResult = simpleMapProfileToForm(innerProfile, formData);
   if (simpleResult.matches.length > 0) {
     const match = simpleResult.matches[0];
     console.log(`[Autofiller][${FRAME_TYPE}] ✅ simple fallback match → ` +
       `path="${match.profilePath}" value="${match.profileValue}"`);
-    // Stamp a synthetic confidence so downstream code is consistent
     return { ...match, confidence: 0.60, matchedOn: 'keyword-fallback' };
   }
 
@@ -207,7 +190,6 @@ async function runAutofill(fieldInfo, el) {
   return null;
 }
 
-// ── WeakSet to avoid double-attaching ────────────────────────────────────────
 const _attached = new WeakSet();
 
 export function attachAutofiller(fieldInfo) {
@@ -224,7 +206,6 @@ export function attachAutofiller(fieldInfo) {
   el.addEventListener('focus', async () => {
     console.log(`[Autofiller][${FRAME_TYPE}] FOCUS → label="${fieldInfo.label}" value="${el.value}"`);
 
-    // Skip already-filled text inputs
     if (!isSelect && el.value && el.value.trim() !== '') {
       console.log(`[Autofiller][${FRAME_TYPE}] already filled — skipping`);
       return;

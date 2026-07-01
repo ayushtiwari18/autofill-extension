@@ -1,13 +1,12 @@
 /**
  * DEV DATA — Ayush's test profile
  * Used for fast testing without filling the profile form manually.
- * Import this in Popup.jsx: import { DEV_PROFILE } from '../devData.js';
- * Then in checkProfileExists: setProfile(DEV_PROFILE); setCurrentScreen('dashboard');
  *
- * TO DISABLE: set DEV_MODE = false
+ * DEV_MODE is now gated by NODE_ENV — it is NEVER true in production builds.
+ * To force dev mode locally: set DEV_MODE = true manually here (revert before pushing).
  */
 
-export const DEV_MODE = true; // ← set false before production build
+export const DEV_MODE = typeof process !== 'undefined' && process.env.NODE_ENV !== 'production';
 
 export const DEV_PROFILE = {
   version: '1.0',
@@ -19,8 +18,8 @@ export const DEV_PROFILE = {
     personal: {
       firstName: 'Ayush',
       lastName: 'Tiwari',
-      email: 'ayush5410@gmail.com',
-      phone: '+91-9876543210',
+      email: 'dev@example.com',
+      phone: '+91-9999999999',
       address: '123 Main Street, Indore',
       city: 'Indore',
       state: 'Madhya Pradesh',

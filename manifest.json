@@ -9,6 +9,9 @@
     "scripting",
     "tabs"
   ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "action": {
     "default_popup": "public/index.html",
     "default_icon": {
