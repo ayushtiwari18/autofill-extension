@@ -20,19 +20,8 @@ import { calculateConfidence } from './confidence.js';
 // PROFILE VALUE EXTRACTION
 // ============================================
 
-/**
- * Extract a value from the profile object using a dot-notation path.
- * Automatically strips a leading 'profile.' prefix if present,
- * because the caller passes the inner profile object, not the wrapper.
- *
- * @param {Object} profile  - The inner profile object (profile.profile)
- * @param {string} profilePath - e.g. 'profile.personal.firstName' OR 'personal.firstName'
- * @returns {*} The value, or null if not found
- */
 export function getProfileFieldValue(profile, profilePath) {
   try {
-    // Strip 'profile.' prefix — getAllProfilePaths() includes it but
-    // we receive the inner object, so traversal must start without it.
     const normalizedPath = profilePath.startsWith('profile.')
       ? profilePath.slice('profile.'.length)
       : profilePath;
@@ -61,7 +50,6 @@ export function validateFieldType(formField, profilePath, profileValue) {
   try {
     if (profileValue === null || profileValue === undefined) return false;
 
-    // Arrays (skills) — valid if non-empty
     if (Array.isArray(profileValue)) {
       const valid = profileValue.length > 0;
       if (!valid) console.log(`[Mapper]     ❌ Array value is empty for path: ${profilePath}`);
@@ -121,26 +109,32 @@ export function matchField(formField, profile) {
 
       console.log(`[Mapper]   ${profilePath}: score=${finalScore.toFixed(3)}, matched=${matchedStr}`);
 
+      // BUG FIX: only attempt to update bestMatch when this score beats the
+      // current best. Do NOT update bestScore until we confirm the profile
+      // value is valid — otherwise a high-confidence path with a null value
+      // would set bestScore high and block all subsequent valid candidates.
       if (finalScore > bestScore) {
         const profileValue = getProfileFieldValue(profile, profilePath);
 
-        // ── Empty / null guard ──────────────────────────────────────────────
         if (profileValue === null || profileValue === undefined) {
-          console.log(`[Mapper]     ❌ Profile value is null/undefined for: ${profilePath}`);
+          console.log(`[Mapper]     ⚠️  Skipping (null value): ${profilePath} — score not locked in`);
+          // Do NOT update bestScore here — keep searching
           continue;
         }
         if (!Array.isArray(profileValue) && profileValue === '') {
-          console.log(`[Mapper]     ❌ Profile value is empty string for: ${profilePath}`);
+          console.log(`[Mapper]     ⚠️  Skipping (empty string): ${profilePath} — score not locked in`);
           continue;
         }
         if (Array.isArray(profileValue) && profileValue.length === 0) {
-          console.log(`[Mapper]     ❌ Skills array is empty for: ${profilePath}`);
+          console.log(`[Mapper]     ⚠️  Skipping (empty array): ${profilePath} — score not locked in`);
           continue;
         }
-        // ────────────────────────────────────────────────────────────────────
 
         if (!validateFieldType(formField, profilePath, profileValue)) {
           console.log(`[Mapper]     ❌ Type validation failed for: ${profilePath}`);
+          // Lock in the score so we don't keep re-checking the same bad type
+          // but don't set a match
+          bestScore = finalScore;
           continue;
         }
 
@@ -181,8 +175,8 @@ export function matchField(formField, profile) {
 
 export function mapProfileToForm(profile, formData) {
   try {
-    console.log('[Mapper] Starting mapping with profile:', profile);
-    console.log('[Mapper] Form data:', formData);
+    console.log('[Mapper] Starting mapping with profile keys:', profile ? Object.keys(profile) : 'null');
+    console.log('[Mapper] Form data forms count:', formData?.forms?.length ?? 0);
 
     const matches = [];
     const unmatchedFormFields = [];
