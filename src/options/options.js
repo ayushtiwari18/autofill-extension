@@ -4,11 +4,14 @@
  * Saves / loads user profile to/from IDB (profile store).
  * Loaded by dist/options/options.html at runtime.
  * Imports from dist/storage/idb.js (copied by webpack CopyPlugin).
+ *
+ * Note: openDB() is internal to idb.js — it is called automatically
+ * on first saveProfile/getProfile call. Do NOT import it.
  */
 
-import { openDB, saveProfile, getProfile } from '../storage/idb.js';
+import { saveProfile, getProfile } from '../storage/idb.js';
 
-// ── Field list ────────────────────────────────────────────────────────
+// ── Field list ──────────────────────────────────────────────────────
 
 const FIELD_IDS = [
   'fullName', 'email', 'phone', 'dob', 'gender',
@@ -33,7 +36,7 @@ function showToast(msg, type = 'success') {
   _toastTimer = setTimeout(() => { el.className = 'toast'; }, 2800);
 }
 
-// ── Form helpers ─────────────────────────────────────────────────────
+// ── Form helpers ────────────────────────────────────────────────────
 
 function readForm() {
   const data = { id: PROFILE_ID, updatedAt: new Date().toISOString() };
@@ -52,7 +55,7 @@ function populateForm(profile) {
   });
 }
 
-// ── Handlers ────────────────────────────────────────────────────────
+// ── Handlers ───────────────────────────────────────────────────────
 
 async function handleSave(e) {
   e.preventDefault();
@@ -77,11 +80,12 @@ function handleReset() {
   showToast('Form cleared', 'info');
 }
 
-// ── Init ──────────────────────────────────────────────────────────────
+// ── Init ─────────────────────────────────────────────────────────────
+// openDB() is called automatically by getProfile() on first use.
+// No need to call it explicitly here.
 
 async function init() {
   try {
-    await openDB();
     const profile = await getProfile(PROFILE_ID);
     if (profile) {
       populateForm(profile);
