@@ -2,7 +2,6 @@
  * fingerprint.js — Label normalizer + field fingerprinter
  * ─────────────────────────────────────────────────────────
  * Pure utility module. Zero DOM dependencies. Zero IDB dependencies.
- * Import anywhere — content scripts, background, options, tests.
  *
  * Exports:
  *   normalizeLabel(rawLabel)              → string
@@ -15,62 +14,20 @@
 // NORMALIZE LABEL
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Normalize a raw field label into a stable, lowercase key.
- *
- * Rules applied in order:
- *  1. Coerce to string, handle null/undefined → empty string
- *  2. Lowercase
- *  3. Strip (required) / (optional) word markers
- *  4. Strip ALL parenthetical clauses: (anything inside)
- *  5. Strip ALL asterisks (globally, handles "* * *" → "")
- *  6. Strip leading/trailing punctuation noise: : ; - _
- *  7. Collapse multiple whitespace → single space
- *  8. Trim
- *
- * Examples:
- *  "Full Name *"                        → "full name"
- *  "Email Address   (Write your Email) *" → "email address"
- *  "Contact Number *"                   → "contact number"
- *  "  Phone (required)  "               → "phone"
- *  "* * *"                              → ""
- *  "What is your LinkedIn URL?"         → "what is your linkedin url?"
- *  ""                                   → ""
- *  null / undefined                     → ""
- *
- * @param {*} rawLabel
- * @returns {string}
- */
 export function normalizeLabel(rawLabel) {
   if (rawLabel === null || rawLabel === undefined) return '';
 
   let s = String(rawLabel);
-
-  // Step 1 — lowercase
   s = s.toLowerCase();
-
-  // Step 2 — strip (required) / (optional) word markers anywhere in string
   s = s.replace(/\s*\(required\)\s*/gi, ' ');
   s = s.replace(/\s*\(optional\)\s*/gi, ' ');
   s = s.replace(/\brequired\b/gi, '');
   s = s.replace(/\boptional\b/gi,  '');
-
-  // Step 3 — strip ALL parenthetical clauses: (anything)
-  //  e.g. "email address (write your correct email)" → "email address "
   s = s.replace(/\([^)]*\)/g, '');
-
-  // Step 4 — strip ALL asterisks globally (handles "* * *", "name *", "* name")
   s = s.replace(/\*/g, '');
-
-  // Step 5 — strip leading/trailing punctuation noise: : ; - _
   s = s.replace(/^[:\-_;]+/, '').replace(/[:\-_;]+$/, '');
-
-  // Step 6 — collapse whitespace
   s = s.replace(/\s+/g, ' ');
-
-  // Step 7 — trim
   s = s.trim();
-
   return s;
 }
 
@@ -79,38 +36,19 @@ export function normalizeLabel(rawLabel) {
 // FIELD TYPE DETECTION
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Determine the logical field type from a DOM element.
- * Returns a stable string used in fingerprints.
- *
- * Handles:
- *  - <input type="text|email|tel|number|url|date|...">
- *  - <textarea>
- *  - <select>
- *  - div[role="radiogroup"]  (Google Forms MCQ)
- *  - div[role="group"]       (Google Forms checkbox)
- *
- * @param {Element} el
- * @returns {string}  one of: text | email | tel | number | url | date |
- *                            textarea | select | radio | checkbox | unknown
- */
 export function detectFieldType(el) {
   if (!el || !el.tagName) return 'unknown';
-
   const tag  = el.tagName.toLowerCase();
   const role = (el.getAttribute('role') || '').toLowerCase();
 
   if (tag === 'textarea')  return 'textarea';
   if (tag === 'select')    return 'select';
-
-  // Google Forms custom role-based widgets
   if (role === 'radiogroup') return 'radio';
   if (role === 'group')      return 'checkbox';
   if (role === 'listbox')    return 'select';
 
   if (tag === 'input') {
     const type = (el.type || 'text').toLowerCase();
-    // Map all text-like types → 'text' for simpler fingerprinting
     if (['text', 'search', 'password'].includes(type)) return 'text';
     if (type === 'email')    return 'email';
     if (type === 'tel')      return 'tel';
@@ -121,7 +59,6 @@ export function detectFieldType(el) {
     if (type === 'radio')    return 'radio';
     return type;
   }
-
   return 'unknown';
 }
 
@@ -130,72 +67,56 @@ export function detectFieldType(el) {
 // BUILD FINGERPRINT
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Build a stable fingerprint string from components.
- *
- * Format: "domain::normalizedLabel::fieldType"
- * Examples:
- *   "docs.google.com::full name::text"
- *   "linkedin.com::phone number::tel"
- *   "forms.gle::email address::email"
- *
- * @param {string} domain     — e.g. "docs.google.com" (window.location.hostname)
- * @param {string} rawLabel   — raw label string (will be normalized here)
- * @param {string} fieldType  — from detectFieldType()
- * @returns {string}          — fingerprint, or empty string if label is empty
- */
 export function buildFingerprint(domain, rawLabel, fieldType) {
   const label = normalizeLabel(rawLabel);
   if (!label) return '';
-
   const d = (domain || 'unknown').toLowerCase().trim();
   const t = (fieldType || 'text').toLowerCase().trim();
-
   return `${d}::${label}::${t}`;
 }
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// FINGERPRINT A DOM FIELD (convenience wrapper)
+// LABEL EXTRACTION  ──  Multi-strategy, Google Forms aware
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Extract label text from a DOM field element using multiple strategies.
+ * Extract label text from a DOM field element.
  *
- * Strategies (in order):
- *  S1 — aria-labelledby → find referenced element text
- *  S2 — aria-label attribute
- *  S3 — <label for="id"> association
- *  S4 — closest parent label text
- *  S5 — placeholder attribute
- *  S6 — name / id attribute as last resort
- *
- * @param {Element} el
- * @returns {string}  raw label (not yet normalized)
+ * Strategies (in priority order):
+ *  S1  — aria-labelledby on the element itself
+ *  S1b — aria-labelledby / aria-label on ANCESTOR wrappers (Google Forms
+ *          puts the label on a parent div, not the <input>)
+ *  S2  — aria-label on the element
+ *  S3  — <label for="id"> association
+ *  S4  — closest ancestor <label>
+ *  S4b — preceding siblings / nearby heading text (Google Forms question
+ *          title is a sibling div, not a <label>)
+ *  S5  — placeholder
+ *  S6  — name / id as last resort
  */
 export function extractLabelText(el) {
   if (!el) return '';
 
-  // S1 — aria-labelledby (most reliable, used by Google Forms)
+  // S1 — aria-labelledby on element
   const labelledBy = el.getAttribute('aria-labelledby');
   if (labelledBy) {
-    const parts = labelledBy.trim().split(/\s+/);
-    const texts = parts
+    const texts = labelledBy.trim().split(/\s+/)
       .map(id => document.getElementById(id))
       .filter(Boolean)
-      .map(node => node.textContent.trim())
+      .map(n => n.textContent.trim())
       .filter(Boolean);
     if (texts.length) return texts.join(' ');
   }
 
-  // S2 — aria-label
+  // S2 — aria-label on element
   const ariaLabel = el.getAttribute('aria-label');
   if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
 
   // S3 — <label for="id">
   if (el.id) {
-    const label = document.querySelector(`label[for="${el.id}"]`);
-    if (label) return label.textContent.trim();
+    const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    if (lbl) return lbl.textContent.trim();
   }
 
   // S4 — closest ancestor <label>
@@ -207,40 +128,64 @@ export function extractLabelText(el) {
     if (t) return t;
   }
 
+  // S1b — Walk UP ancestors looking for aria-labelledby / aria-label
+  //        (Google Forms: label is on a parent wrapper div)
+  let ancestor = el.parentElement;
+  for (let i = 0; i < 6 && ancestor; i++) {
+    const alb = ancestor.getAttribute('aria-labelledby');
+    if (alb) {
+      const texts = alb.trim().split(/\s+/)
+        .map(id => document.getElementById(id))
+        .filter(Boolean)
+        .map(n => n.textContent.trim())
+        .filter(Boolean);
+      if (texts.length) return texts.join(' ');
+    }
+    const al = ancestor.getAttribute('aria-label');
+    if (al && al.trim()) return al.trim();
+    ancestor = ancestor.parentElement;
+  }
+
+  // S4b — Look at preceding siblings for a question-title element.
+  //        Google Forms renders:  <div class="...">Question text</div>
+  //                               <div class="..."><input ...></div>
+  //        We walk up to the closest block-level container, then look
+  //        for preceding sibling text nodes / divs / spans.
+  const container = el.closest('div,li,fieldset,section') || el.parentElement;
+  if (container && container.parentElement) {
+    const siblings = Array.from(container.parentElement.children);
+    const idx = siblings.indexOf(container);
+    // Inspect up to 3 preceding siblings
+    for (let j = idx - 1; j >= 0 && j >= idx - 3; j--) {
+      const sib = siblings[j];
+      const txt = sib.textContent.trim();
+      // Accept if it looks like a question title (not too long, not empty)
+      if (txt && txt.length > 0 && txt.length < 120) {
+        return txt;
+      }
+    }
+  }
+
   // S5 — placeholder
   const placeholder = el.getAttribute('placeholder');
   if (placeholder && placeholder.trim()) return placeholder.trim();
 
-  // S6 — name or id
+  // S6 — name / id
   return el.name || el.id || '';
 }
 
 
-/**
- * Full convenience function: given a DOM element + current domain,
- * returns everything needed to query IDB.
- *
- * @param {Element} el
- * @param {string}  domain  — defaults to window.location.hostname
- * @returns {{ fingerprint: string, label: string, fieldType: string, rawLabel: string }}
- *          Returns fingerprint='' if no usable label found.
- */
+// ═══════════════════════════════════════════════════════════════════════════
+// FINGERPRINT A DOM FIELD  (convenience wrapper)
+// ═══════════════════════════════════════════════════════════════════════════
+
 export function fingerprintField(el, domain) {
   const d          = domain || (typeof window !== 'undefined' ? window.location.hostname : 'unknown');
   const rawLabel   = extractLabelText(el);
   const fieldType  = detectFieldType(el);
   const label      = normalizeLabel(rawLabel);
   const fingerprint = buildFingerprint(d, rawLabel, fieldType);
-
   return { fingerprint, label, fieldType, rawLabel };
 }
 
-
-// Default export — named object for easy destructuring
-export default {
-  normalizeLabel,
-  detectFieldType,
-  buildFingerprint,
-  extractLabelText,
-  fingerprintField,
-};
+export default { normalizeLabel, detectFieldType, buildFingerprint, extractLabelText, fingerprintField };
