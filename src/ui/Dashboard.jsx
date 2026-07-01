@@ -1,15 +1,18 @@
 /**
- * Dashboard.jsx — SmartFill main screen
- * ─────────────────────────────────────────────────────────
- * FIXED: getStorageUsage() no longer calls chrome.storage.local.getBytesInUse()
- * (wrong store). Now estimates IDB usage via JSON.stringify of the profile
- * record, which is the only large object we write to IDB from the popup.
- * Real IDB quota estimation requires StorageManager.estimate() which we
- * call as a secondary source when available.
+ * Dashboard.jsx — SmartFill main screen (Step 2: fuzzy engine upgrade)
+ *
+ * CHANGED: handleAutofill() now calls mapProfileToForm() from engine/mapper.js
+ * (Levenshtein confidence scoring) instead of simpleMapProfileToForm().
+ * Falls back to simpleMapProfileToForm() if mapper returns 0 matches so
+ * there are no regressions on sites that already worked.
+ *
+ * overallConfidence and requiresReview from mapper are passed through to
+ * the Review screen via mappingResult.
  */
-import React, { useState, useEffect }     from 'react';
-import { useAppContext }                   from './Popup.jsx';
-import { simpleMapProfileToForm }          from '../engine/simpleMapper.js';
+import React, { useState, useEffect }    from 'react';
+import { useAppContext }                  from './Popup.jsx';
+import { mapProfileToForm }              from '../engine/mapper.js';       // PRIMARY
+import { simpleMapProfileToForm }        from '../engine/simpleMapper.js'; // FALLBACK
 
 function Dashboard() {
   const {
@@ -20,11 +23,11 @@ function Dashboard() {
     resetState,
   } = useAppContext();
 
-  const [storageUsage, setStorageUsage]       = useState(0);
+  const [storageUsage, setStorageUsage]           = useState(0);
   const [profileCompletion, setProfileCompletion] = useState(0);
-  const [formsDetected, setFormsDetected]     = useState(0);
-  const [scanning, setScanning]               = useState(false);
-  const [lastScannedUrl, setLastScannedUrl]   = useState('');
+  const [formsDetected, setFormsDetected]         = useState(0);
+  const [scanning, setScanning]                   = useState(false);
+  const [lastScannedUrl, setLastScannedUrl]       = useState('');
 
   useEffect(() => {
     calculateProfileCompletion();
@@ -49,20 +52,15 @@ function Dashboard() {
     setProfileCompletion(total > 0 ? Math.round((filled / total) * 100) : 0);
   };
 
-  // FIXED: estimate IDB usage instead of querying chrome.storage.local
   const getStorageUsage = async () => {
     try {
       let bytes = 0;
-
-      // Primary: StorageManager.estimate() gives real browser quota/usage
       if (navigator.storage && navigator.storage.estimate) {
         const est = await navigator.storage.estimate();
         bytes = est.usage || 0;
       } else if (profile) {
-        // Fallback: estimate from profile JSON size
         bytes = new Blob([JSON.stringify(profile)]).size;
       }
-
       setStorageUsage((bytes / (1024 * 1024)).toFixed(2));
     } catch (err) {
       console.error('[Dashboard] Storage estimate error:', err);
@@ -125,16 +123,38 @@ function Dashboard() {
         alert('No forms detected. Click Scan Page first.');
         return;
       }
+
+      // Always pass the INNER profile object to both mappers
       const innerProfile = profile?.profile ?? profile;
-      const mapping = simpleMapProfileToForm(innerProfile, response.formData);
+
+      // ── PRIMARY: fuzzy mapper ───────────────────────────────────────────
+      console.log('[Dashboard] Running mapProfileToForm (fuzzy engine)...');
+      let mapping = mapProfileToForm(innerProfile, response.formData);
+      console.log('[Dashboard] Fuzzy mapping:', mapping.matches.length,
+        'matches, confidence:', mapping.overallConfidence);
+
+      // ── FALLBACK: simple keyword mapper ────────────────────────────────
+      if (!mapping.matches || mapping.matches.length === 0) {
+        console.warn('[Dashboard] Fuzzy mapper returned 0 matches — trying simpleMapper fallback');
+        mapping = simpleMapProfileToForm(innerProfile, response.formData);
+        console.log('[Dashboard] Simple fallback:', mapping.matches.length, 'matches');
+      }
+
       if (!mapping.matches || mapping.matches.length === 0) {
         const fieldSummary = response.formData.forms
           .flatMap(f => f.fields)
           .map(f => `  • label="${f.label}" name="${f.name}" type="${f.type}"`)
           .join('\n');
-        alert(`No fields matched.\n\nDetected fields:\n${fieldSummary}\n\nCheck console (F12) for details.`);
+        alert(
+          `No fields matched.\n\n` +
+          `Fuzzy confidence: ${(mapping.overallConfidence * 100).toFixed(0)}%\n\n` +
+          `Detected fields:\n${fieldSummary}\n\n` +
+          `Check console (F12) for details.`
+        );
         return;
       }
+
+      // Pass full mapping result (with confidence + requiresReview) to Review screen
       setMappingResult(mapping);
       setCurrentScreen('review');
     } catch (err) {
