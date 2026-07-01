@@ -1,213 +1,173 @@
 /**
- * Autofill Executor
- * Programmatically fills form fields with matched profile values
- * Triggers proper DOM events for validation
+ * Autofill Executor - Phase 8
+ * Key fix: use querySelectorAll[index] when selector matches multiple elements
+ * (Google Forms uses jsname="YPqjbf" on ALL inputs)
  */
 
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
+// ─── helpers ────────────────────────────────────────────────────────────────
 
 function findElement(match) {
-  console.log(`[Executor] findElement → label="${match.formFieldLabel}" selector="${match.formFieldSelector}" id="${match.formFieldId}"`);
+  const { formFieldLabel, formFieldSelector, formFieldId, formFieldIndex } = match;
+  console.log(`[Executor] findElement → label="${formFieldLabel}" selector="${formFieldSelector}" index=${formFieldIndex ?? 'n/a'}`);
 
-  if (match.formFieldSelector) {
+  if (formFieldSelector) {
     try {
-      const el = document.querySelector(match.formFieldSelector);
-      if (el) { console.log(`  ✔ Found via CSS selector: ${match.formFieldSelector}`); return el; }
-      else { console.warn(`  ✘ CSS selector found nothing: ${match.formFieldSelector}`); }
-    } catch (e) { console.warn(`  ✘ Invalid CSS selector: ${match.formFieldSelector}`, e.message); }
+      // Always collect ALL matches first
+      const all = document.querySelectorAll(formFieldSelector);
+      console.log(`  ℹ querySelectorAll("${formFieldSelector}") → ${all.length} element(s)`);
+
+      if (all.length === 1) {
+        console.log(`  ✔ Unique selector — using element directly`);
+        return all[0];
+      }
+
+      if (all.length > 1) {
+        if (typeof formFieldIndex === 'number' && formFieldIndex < all.length) {
+          const el = all[formFieldIndex];
+          console.log(`  ✔ Ambiguous selector — picked index [${formFieldIndex}]:`, el.outerHTML.slice(0, 120));
+          return el;
+        }
+        // fallback: return first
+        console.warn(`  ⚠ Ambiguous selector but no index — falling back to [0]`);
+        return all[0];
+      }
+
+      console.warn(`  ✘ selector found nothing: ${formFieldSelector}`);
+    } catch (e) {
+      console.warn(`  ✘ Invalid CSS selector: ${formFieldSelector}`, e.message);
+    }
   }
 
-  if (match.formFieldId) {
-    const el = document.getElementById(match.formFieldId);
-    if (el) { console.log(`  ✔ Found via getElementById: #${match.formFieldId}`); return el; }
-    else { console.warn(`  ✘ getElementById found nothing: #${match.formFieldId}`); }
-  }
-
-  if (match.formFieldId) {
+  if (formFieldId) {
+    const el = document.getElementById(formFieldId);
+    if (el) { console.log(`  ✔ getElementById: #${formFieldId}`); return el; }
     try {
-      const el = document.querySelector(`[name="${match.formFieldId}"]`);
-      if (el) { console.log(`  ✔ Found via [name] attribute: ${match.formFieldId}`); return el; }
-      else { console.warn(`  ✘ [name] selector found nothing: ${match.formFieldId}`); }
-    } catch (e) {}
+      const el2 = document.querySelector(`[name="${formFieldId}"]`);
+      if (el2) { console.log(`  ✔ [name] fallback: ${formFieldId}`); return el2; }
+    } catch {}
   }
 
-  console.error(`  ✘ Element NOT FOUND for field: "${match.formFieldLabel}"`);
+  console.error(`  ✘ Element NOT FOUND for: "${formFieldLabel}"`);
   return null;
 }
 
 function isElementFillable(element) {
   if (!element) return { fillable: false, reason: 'Element not found' };
-  if (element.disabled) { console.warn(`  ⚠ Element disabled: ${element.id || element.name}`); return { fillable: false, reason: 'Element is disabled' }; }
-  if (element.readOnly) { console.warn(`  ⚠ Element readOnly: ${element.id || element.name}`); return { fillable: false, reason: 'Element is read-only' }; }
-  if (element.offsetWidth === 0 || element.offsetHeight === 0) { console.warn(`  ⚠ Element hidden (zero size): ${element.id || element.name}`); return { fillable: false, reason: 'Element is hidden' }; }
-
+  if (element.disabled) return { fillable: false, reason: 'Element is disabled' };
+  if (element.readOnly) return { fillable: false, reason: 'Element is read-only' };
+  if (element.offsetWidth === 0 || element.offsetHeight === 0) return { fillable: false, reason: 'Element is hidden' };
   try {
-    const style = window.getComputedStyle(element);
-    if (style.display === 'none' || style.visibility === 'hidden') {
-      console.warn(`  ⚠ Element hidden (CSS): ${element.id || element.name} display=${style.display} visibility=${style.visibility}`);
-      return { fillable: false, reason: 'Element is hidden (CSS)' };
-    }
-  } catch (e) {}
-
-  if (element.type === 'file') {
-    console.warn(`  ⚠ File input detected — skipping autofill (browser security restriction). Upload manually.`);
-    return { fillable: false, reason: 'File input — upload manually in the form' };
-  }
-
+    const s = window.getComputedStyle(element);
+    if (s.display === 'none' || s.visibility === 'hidden') return { fillable: false, reason: 'Element is hidden (CSS)' };
+  } catch {}
+  if (element.type === 'file') return { fillable: false, reason: 'File input — upload manually' };
   return { fillable: true, reason: null };
 }
 
-function setValue(element, value, fieldType) {
+function setValue(element, value) {
   try {
     if (value === null || value === undefined || value === '') {
-      console.warn(`  ⚠ setValue called with empty value for element: ${element.id || element.name}`);
+      console.warn(`  ⚠ Empty value — skipping`);
+      return false;
+    }
+    if (Array.isArray(value)) value = value.join(', ');
+    const str = String(value);
+    const tag = element.tagName.toLowerCase();
+    console.log(`  ℹ setValue → tag=${tag} type=${element.type} value="${str}"`);
+
+    if (tag === 'select') {
+      const opt = Array.from(element.options).find(o =>
+        o.value === str || o.text === str ||
+        o.value.toLowerCase() === str.toLowerCase() ||
+        o.text.toLowerCase() === str.toLowerCase()
+      );
+      if (opt) { element.value = opt.value; console.log(`  ✔ Select matched: "${opt.text}"`); return true; }
+      console.warn(`  ✘ No option matched "${str}"`);
       return false;
     }
 
-    if (Array.isArray(value)) {
-      console.log(`  ℹ Value is array [${value.join(', ')}] — joining with ", "`);
-      value = value.join(', ');
-    }
-
-    const stringValue = String(value);
-    const tagName = element.tagName.toLowerCase();
-    console.log(`  ℹ setValue → tag=${tagName} type=${element.type} targetValue="${stringValue}"`);
-
-    if (tagName === 'select') {
-      const options = Array.from(element.options);
-      const match = options.find(opt =>
-        opt.value === stringValue ||
-        opt.text === stringValue ||
-        opt.value.toLowerCase() === stringValue.toLowerCase() ||
-        opt.text.toLowerCase() === stringValue.toLowerCase()
-      );
-      if (match) {
-        element.value = match.value;
-        console.log(`  ✔ Select option matched: "${match.text}" (value="${match.value}")`);
-        return true;
+    if (tag === 'input' || tag === 'textarea') {
+      const proto = tag === 'textarea' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+      const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (desc && desc.set) {
+        desc.set.call(element, str);
+        console.log(`  ℹ Native setter used`);
       } else {
-        console.warn(`  ✘ No matching <option> for value "${stringValue}". Available options: [${options.map(o => o.value).join(', ')}]`);
+        element.value = str;
+        console.log(`  ℹ Direct .value assignment`);
+      }
+      if (element.value !== str) {
+        console.error(`  ✘ Value mismatch — expected "${str}" got "${element.value}"`);
         return false;
       }
-    }
-
-    if (tagName === 'input' || tagName === 'textarea') {
-      // Try native setter first (works with React controlled inputs)
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        tagName === 'textarea' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
-        'value'
-      );
-
-      if (nativeInputValueSetter && nativeInputValueSetter.set) {
-        nativeInputValueSetter.set.call(element, stringValue);
-        console.log(`  ℹ Native setter used for ${tagName}`);
-      } else {
-        element.value = stringValue;
-        console.log(`  ℹ Direct .value assignment used for ${tagName}`);
-      }
-
-      const afterValue = element.value;
-      if (afterValue !== stringValue) {
-        console.error(`  ✘ setValue MISMATCH on ${tagName}#${element.id || element.name}`);
-        console.error(`    Expected : "${stringValue}"`);
-        console.error(`    Got      : "${afterValue}"`);
-        console.error(`    Possible cause: React controlled input rejecting value, maxLength, or input type constraint`);
-        return false;
-      }
-
-      console.log(`  ✔ Value confirmed set: "${afterValue}"`);
+      console.log(`  ✔ Value confirmed: "${element.value}"`);
       return true;
     }
 
-    element.value = stringValue;
+    element.value = str;
     return true;
-
-  } catch (error) {
-    console.error('[Executor] setValue threw an error:', error);
+  } catch (e) {
+    console.error('[Executor] setValue error:', e);
     return false;
   }
 }
 
 function triggerEvents(element) {
   try {
-    console.log(`  ℹ Triggering events on ${element.tagName.toLowerCase()}#${element.id || element.name || '(no id)'}`);
-    ['focus', 'input', 'change', 'blur'].forEach(eventName => {
-      const event = new Event(eventName, { bubbles: true, cancelable: true });
-      element.dispatchEvent(event);
+    ['focus', 'input', 'change', 'blur'].forEach(name => {
+      element.dispatchEvent(new Event(name, { bubbles: true, cancelable: true }));
     });
-    // Also fire React-style synthetic event
-    const reactInputEvent = new InputEvent('input', { bubbles: true, cancelable: true, data: element.value });
-    element.dispatchEvent(reactInputEvent);
-    console.log(`  ✔ Events fired: focus, input, change, blur + synthetic InputEvent`);
-  } catch (error) {
-    console.error('[Executor] Event trigger error:', error);
+    element.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, data: element.value }));
+    console.log(`  ✔ Events fired: focus, input, change, blur + InputEvent`);
+  } catch (e) {
+    console.error('[Executor] triggerEvents error:', e);
   }
 }
 
 function fillSingleField(match) {
-  console.log(`\n[Executor] ── Field: "${match.formFieldLabel}" ──`);
-  console.log(`  profileValue : ${JSON.stringify(match.profileValue)}`);
-  console.log(`  formFieldType: ${match.formFieldType}`);
+  console.log(`\n[Executor] ── Field: "${match.formFieldLabel}" (index=${match.formFieldIndex ?? 'n/a'}) ──`);
+  console.log(`  value: ${JSON.stringify(match.profileValue)}`);
 
-  const element = findElement(match);
-  if (!element) return { success: false, reason: 'Element not found', label: match.formFieldLabel, skipped: false };
+  const el = findElement(match);
+  if (!el) return { success: false, reason: 'Element not found', label: match.formFieldLabel };
 
-  const { fillable, reason } = isElementFillable(element);
+  const { fillable, reason } = isElementFillable(el);
   if (!fillable) return { success: false, reason, label: match.formFieldLabel, skipped: true };
 
-  const valueSet = setValue(element, match.profileValue, match.formFieldType);
-  if (!valueSet) return { success: false, reason: 'Failed to set value', label: match.formFieldLabel, skipped: false };
+  const ok = setValue(el, match.profileValue);
+  if (!ok) return { success: false, reason: 'setValue failed', label: match.formFieldLabel };
 
-  triggerEvents(element);
-  return { success: true, reason: null, label: match.formFieldLabel, skipped: false };
+  triggerEvents(el);
+  console.log(`  ✅ Filled: "${match.formFieldLabel}"`);
+  return { success: true, label: match.formFieldLabel };
 }
 
-// ============================================
-// MAIN EXECUTION FUNCTION
-// ============================================
+// ─── main export ────────────────────────────────────────────────────────────
 
 export function executeAutofill(matches) {
-  const startTime = Date.now();
-  console.log(`\n[Executor] ════════ Starting autofill for ${matches.length} fields ════════`);
+  const t0 = Date.now();
+  console.log(`\n[Executor] ════════ autofill START — ${matches.length} field(s) ════════`);
 
   if (!Array.isArray(matches) || matches.length === 0) {
-    console.error('[Executor] Invalid or empty matches array');
-    return { success: false, successCount: 0, totalFields: 0, failedFields: [], skippedFields: [], executionTime: 0, error: 'Invalid matches array' };
+    console.error('[Executor] Empty matches array');
+    return { success: false, successCount: 0, totalFields: 0, failedFields: [], skippedFields: [], executionTime: 0 };
   }
 
-  const results = { successCount: 0, failedFields: [], skippedFields: [] };
+  const failed = [], skipped = [];
+  let ok = 0;
 
-  matches.forEach((match, index) => {
-    console.log(`\n[Executor] Processing field ${index + 1}/${matches.length}: ${match.formFieldLabel}`);
-    const result = fillSingleField(match);
-
-    if (result.success) {
-      results.successCount++;
-      console.log(`  ✅ Filled: ${match.formFieldLabel}`);
-    } else if (result.skipped) {
-      results.skippedFields.push({ label: result.label, reason: result.reason, selector: match.formFieldSelector });
-      console.log(`  ⏭️ Skipped: ${match.formFieldLabel} — ${result.reason}`);
-    } else {
-      results.failedFields.push({ label: result.label, reason: result.reason, selector: match.formFieldSelector });
-      console.log(`  ❌ Failed: ${match.formFieldLabel} — ${result.reason}`);
-    }
+  matches.forEach((match, i) => {
+    console.log(`\n[Executor] ── ${i+1}/${matches.length}: "${match.formFieldLabel}" ──`);
+    const r = fillSingleField(match);
+    if (r.success) ok++;
+    else if (r.skipped) skipped.push(r);
+    else failed.push(r);
   });
 
-  const executionTime = Date.now() - startTime;
-  console.log(`\n[Executor] ════════ Autofill complete ════════`);
-  console.log(`  ✅ Success : ${results.successCount}/${matches.length}`);
-  console.log(`  ❌ Failed  : ${results.failedFields.length}`, results.failedFields.length ? results.failedFields : '');
-  console.log(`  ⏭️ Skipped : ${results.skippedFields.length}`, results.skippedFields.length ? results.skippedFields : '');
-  console.log(`  ⏱ Time    : ${executionTime}ms`);
+  const ms = Date.now() - t0;
+  console.log(`\n[Executor] ════════ autofill DONE ════════`);
+  console.log(`  ✅ ${ok}/${matches.length} filled  ❌ ${failed.length} failed  ⏭ ${skipped.length} skipped  ⏱ ${ms}ms`);
+  if (failed.length) console.error('  Failed:', failed.map(f => f.label));
 
-  return {
-    success: results.successCount > 0,
-    successCount: results.successCount,
-    totalFields: matches.length,
-    failedFields: results.failedFields,
-    skippedFields: results.skippedFields,
-    executionTime
-  };
+  return { success: ok > 0, successCount: ok, totalFields: matches.length, failedFields: failed, skippedFields: skipped, executionTime: ms };
 }
