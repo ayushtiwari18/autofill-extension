@@ -10,6 +10,8 @@
  *         → confidence < 0.55 or 0 matches → try simpleMapper fallback
  *
  * FIX: removed dead import of executeAutofill (was imported but never used).
+ * FIX: added _tooltipActive guard + debounce to prevent duplicate suggestions
+ *      on rapid focus/blur cycles (e.g. Google Forms typeahead re-focus bursts).
  */
 
 import { loadProfile as loadProfileFromMatcher }  from './profileMatcher.js';
@@ -22,6 +24,9 @@ const IS_IFRAME  = window.self !== window.top;
 const FRAME_TYPE = IS_IFRAME ? 'IFRAME' : 'TOP';
 
 const CONFIDENCE_THRESHOLD = 0.55;
+
+// Debounce delay (ms) — absorbs rapid focus bursts from Google Forms / React inputs
+const FOCUS_DEBOUNCE_MS = 300;
 
 let _profileCache = null;
 async function getProfile() {
@@ -203,42 +208,66 @@ export function attachAutofiller(fieldInfo) {
   console.log(`[Autofiller][${FRAME_TYPE}] attachAutofiller → ` +
     `label="${fieldInfo.label}" el=${el.tagName} type=${fieldInfo.type} on ${DOMAIN}`);
 
-  el.addEventListener('focus', async () => {
-    console.log(`[Autofiller][${FRAME_TYPE}] FOCUS → label="${fieldInfo.label}" value="${el.value}"`);
+  // ── Duplicate-suggestion guard ───────────────────────────────────────
+  // Prevents stacked tooltips when a field rapidly blurs+refocuses
+  // (common in Google Forms typeahead, React controlled inputs, etc.)
+  let _tooltipActive = false;
+  let _focusDebounceTimer = null;
+  // ─────────────────────────────────────────────────────────────────────
 
-    if (!isSelect && el.value && el.value.trim() !== '') {
-      console.log(`[Autofiller][${FRAME_TYPE}] already filled — skipping`);
-      return;
-    }
+  el.addEventListener('focus', () => {
+    // Debounce: cancel any pending handler and restart the timer
+    clearTimeout(_focusDebounceTimer);
+    _focusDebounceTimer = setTimeout(async () => {
 
-    const match = await runAutofill(fieldInfo, el);
-    if (!match) return;
+      // Guard: if a tooltip is already showing for this element, do nothing
+      if (_tooltipActive) {
+        console.log(`[Autofiller][${FRAME_TYPE}] tooltip already active — skipping duplicate focus for "${fieldInfo.label}"`);
+        return;
+      }
 
-    const rect    = el.getBoundingClientRect();
-    const visible = rect.width > 0 && rect.height > 0 &&
-                    rect.top < window.innerHeight && rect.bottom > 0;
+      console.log(`[Autofiller][${FRAME_TYPE}] FOCUS → label="${fieldInfo.label}" value="${el.value}"`);
 
-    if (isSelect) {
-      console.log(`[Autofiller][${FRAME_TYPE}] SELECT fill → "${match.profileValue}"`);
-      const ok = handleSelectFill(el, match.profileValue);
-      if (ok) showBadge(el);
-      return;
-    }
+      if (!isSelect && el.value && el.value.trim() !== '') {
+        console.log(`[Autofiller][${FRAME_TYPE}] already filled — skipping`);
+        return;
+      }
 
-    if (visible) {
-      console.log(`[Autofiller][${FRAME_TYPE}] showing tooltip for label="${fieldInfo.label}"`);
-      showTooltip(el, { label: fieldInfo.label, value: match.profileValue }, (accepted) => {
-        console.log(`[Autofiller][${FRAME_TYPE}] ✅ accepted → "${fieldInfo.label}" = "${accepted}"`);
-        const ok = fillElementDirectly(el, accepted);
+      const match = await runAutofill(fieldInfo, el);
+      if (!match) return;
+
+      const rect    = el.getBoundingClientRect();
+      const visible = rect.width > 0 && rect.height > 0 &&
+                      rect.top < window.innerHeight && rect.bottom > 0;
+
+      if (isSelect) {
+        console.log(`[Autofiller][${FRAME_TYPE}] SELECT fill → "${match.profileValue}"`);
+        const ok = handleSelectFill(el, match.profileValue);
         if (ok) showBadge(el);
-      });
-    } else {
-      console.log(`[Autofiller][${FRAME_TYPE}] offscreen — silent fill "${fieldInfo.label}" → "${match.profileValue}"`);
-      fillElementDirectly(el, match.profileValue);
-    }
+        return;
+      }
+
+      if (visible) {
+        _tooltipActive = true;
+        console.log(`[Autofiller][${FRAME_TYPE}] showing tooltip for label="${fieldInfo.label}"`);
+        showTooltip(el, { label: fieldInfo.label, value: match.profileValue }, (accepted) => {
+          console.log(`[Autofiller][${FRAME_TYPE}] ✅ accepted → "${fieldInfo.label}" = "${accepted}"`);
+          const ok = fillElementDirectly(el, accepted);
+          if (ok) showBadge(el);
+          _tooltipActive = false;
+        });
+      } else {
+        console.log(`[Autofiller][${FRAME_TYPE}] offscreen — silent fill "${fieldInfo.label}" → "${match.profileValue}"`);
+        fillElementDirectly(el, match.profileValue);
+      }
+
+    }, FOCUS_DEBOUNCE_MS);
   });
 
   el.addEventListener('blur', () => {
+    // Clear any pending debounce so a quick focus→blur→focus doesn't fire twice
+    clearTimeout(_focusDebounceTimer);
+    _tooltipActive = false;
     setTimeout(() => hideTooltip(), 300);
   });
 }
