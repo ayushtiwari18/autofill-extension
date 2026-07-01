@@ -2,11 +2,7 @@ import React, { useState } from 'react';
 import { useAppContext } from './Popup.jsx';
 
 function Review() {
-  const {
-    mappingResult,
-    setCurrentScreen
-  } = useAppContext();
-
+  const { mappingResult, setCurrentScreen } = useAppContext();
   const [editedMatches, setEditedMatches] = useState(mappingResult?.matches || []);
   const [showUnmatched, setShowUnmatched] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -14,13 +10,8 @@ function Review() {
   if (!mappingResult) {
     return (
       <div className="content">
-        <div className="alert alert-error">
-          No mapping data available
-        </div>
-        <button
-          className="btn btn-secondary btn-block"
-          onClick={() => setCurrentScreen('dashboard')}
-        >
+        <div className="alert alert-error">No mapping data available</div>
+        <button className="btn btn-secondary btn-block" onClick={() => setCurrentScreen('dashboard')}>
           Back to Dashboard
         </button>
       </div>
@@ -28,90 +19,59 @@ function Review() {
   }
 
   const getConfidenceBadge = (confidence) => {
-    if (confidence >= 0.8) {
-      return <span className="confidence-badge confidence-high">High</span>;
-    } else if (confidence >= 0.6) {
-      return <span className="confidence-badge confidence-medium">Medium</span>;
-    } else {
-      return <span className="confidence-badge confidence-low">Low</span>;
-    }
+    if (confidence >= 0.8) return <span className="confidence-badge confidence-high">High</span>;
+    if (confidence >= 0.6) return <span className="confidence-badge confidence-medium">Medium</span>;
+    return <span className="confidence-badge confidence-low">Low</span>;
   };
 
   const handleEditMatch = (index, newValue) => {
     setEditedMatches(prev => {
       const updated = [...prev];
-      updated[index].profileValue = newValue;
+      updated[index] = { ...updated[index], profileValue: newValue };
       return updated;
     });
   };
 
   const handleConfirm = async () => {
     setLoading(true);
-
     try {
-      // Get active tab
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab) {
-        alert('No active tab found');
-        setLoading(false);
-        return;
-      }
+      if (!tab) { alert('No active tab found'); return; }
 
-      // Send autofill command to content script
+      console.log('[Review] Sending AUTOFILL to tab', tab.id, 'with', editedMatches.length, 'matches');
+
       const response = await chrome.tabs.sendMessage(tab.id, {
         action: 'AUTOFILL',
         matches: editedMatches
       });
 
-      // Handle response
+      console.log('[Review] AUTOFILL response:', response);
+
       if (response && response.success) {
         const { results } = response;
-        
-        // Build success message
-        let message = `✅ Autofill Complete!\n\n`;
-        message += `✓ Successfully filled: ${results.successCount}/${results.totalFields} fields\n`;
-        
-        if (results.skippedFields.length > 0) {
-          message += `\n⏩ Skipped ${results.skippedFields.length} field(s):\n`;
-          results.skippedFields.forEach(field => {
-            message += `  • ${field.label}: ${field.reason}\n`;
-          });
-        }
-        
-        if (results.failedFields.length > 0) {
-          message += `\n❌ Failed ${results.failedFields.length} field(s):\n`;
-          results.failedFields.forEach(field => {
-            message += `  • ${field.label}: ${field.reason}\n`;
-          });
-        }
-        
-        message += `\n⏱ Completed in ${results.executionTime}ms`;
-        
-        if (results.skippedFields.some(f => f.reason.includes('File'))) {
-          message += `\n\n📎 Note: File uploads must be done manually for security reasons.`;
-        }
-        
-        alert(message);
+        let msg = `✅ Autofill Complete!\n\n`;
+        msg += `Filled: ${results.successCount}/${results.totalFields} fields`;
+        if (results.skippedFields.length > 0)
+          msg += `\nSkipped: ${results.skippedFields.map(f => f.label).join(', ')}`;
+        if (results.failedFields.length > 0)
+          msg += `\nFailed: ${results.failedFields.map(f => `${f.label} (${f.reason})`).join(', ')}`;
+        alert(msg);
         setCurrentScreen('dashboard');
-        
       } else {
-        const errorMsg = response?.error || 'Unknown error occurred';
-        alert(`❌ Autofill failed:\n\n${errorMsg}`);
+        alert(`❌ Autofill failed: ${response?.error || 'Unknown error'}`);
       }
-
     } catch (err) {
-      console.error('[Review] Autofill failed:', err);
-      alert(`❌ Autofill failed:\n\n${err.message}\n\nMake sure you're on the same tab where the form was scanned.`);
+      console.error('[Review] Autofill error:', err);
+      alert(`❌ Autofill failed: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCancel = () => {
-    setCurrentScreen('dashboard');
+  // Safe URL display — works for file:/// too
+  const safeDisplayUrl = (url) => {
+    try { return new URL(url).hostname || url; } catch { return url || 'local file'; }
   };
-
-  const hasLowConfidence = editedMatches.some(m => m.confidence < 0.8);
 
   return (
     <div className="content">
@@ -120,17 +80,9 @@ function Review() {
         {editedMatches.length} field{editedMatches.length !== 1 ? 's' : ''} will be autofilled
       </p>
 
-      {/* Warning for low confidence */}
-      {hasLowConfidence && (
-        <div className="alert alert-warning mb-16">
-          ⚠️ Some matches have medium confidence. Please review before proceeding.
-        </div>
-      )}
-
-      {/* Overall Confidence */}
       <div className="stats-grid mb-24">
         <div className="stat-card">
-          <div className="stat-value">{Math.round(mappingResult.overallConfidence * 100)}%</div>
+          <div className="stat-value">{Math.round((mappingResult.overallConfidence || 0) * 100)}%</div>
           <div className="stat-label">Overall Confidence</div>
         </div>
         <div className="stat-card">
@@ -139,10 +91,8 @@ function Review() {
         </div>
       </div>
 
-      {/* Matched Fields */}
       <div className="match-list">
         <h3 className="form-section-title mb-16">✅ Matched Fields</h3>
-        
         {editedMatches.map((match, index) => (
           <div key={index} className="match-item">
             <div className="match-info">
@@ -154,8 +104,8 @@ function Review() {
                 onChange={(e) => handleEditMatch(index, e.target.value)}
                 style={{ marginTop: '4px', fontSize: '13px' }}
               />
-              <div className="match-value" style={{ marginTop: '4px', fontSize: '11px', color: '#6c757d' }}>
-                Matched on: {match.matchedOn}
+              <div style={{ marginTop: '4px', fontSize: '11px', color: '#6c757d' }}>
+                → {match.profilePath}
               </div>
             </div>
             <div className="match-badge">
@@ -165,38 +115,25 @@ function Review() {
         ))}
       </div>
 
-      {/* Unmatched Fields */}
       {mappingResult.unmatchedFormFields && mappingResult.unmatchedFormFields.length > 0 && (
         <div className="mt-24">
-          <button
-            className="btn btn-link"
-            onClick={() => setShowUnmatched(!showUnmatched)}
-          >
-            {showUnmatched ? '▼' : '▶'} {mappingResult.unmatchedFormFields.length} unmatched form field{mappingResult.unmatchedFormFields.length !== 1 ? 's' : ''}
+          <button className="btn btn-link" onClick={() => setShowUnmatched(!showUnmatched)}>
+            {showUnmatched ? '▼' : '▶'} {mappingResult.unmatchedFormFields.length} unmatched field(s)
           </button>
-          
           {showUnmatched && (
             <div className="mt-16" style={{ padding: '16px', background: '#f8f9fa', borderRadius: '8px' }}>
-              {mappingResult.unmatchedFormFields.map((field, index) => (
-                <div key={index} style={{ marginBottom: '8px', fontSize: '13px', color: '#6c757d' }}>
-                  • {field.label || field.id} ({field.type})
+              {mappingResult.unmatchedFormFields.map((f, i) => (
+                <div key={i} style={{ marginBottom: '8px', fontSize: '13px', color: '#6c757d' }}>
+                  • {f.label || f.id} ({f.type})
                 </div>
               ))}
-              <div style={{ marginTop: '12px', fontSize: '12px', color: '#6c757d' }}>
-                These fields will not be autofilled. You can fill them manually.
-              </div>
             </div>
           )}
         </div>
       )}
 
-      {/* Action Buttons */}
       <div className="btn-group mt-24">
-        <button
-          className="btn btn-secondary"
-          onClick={handleCancel}
-          disabled={loading}
-        >
+        <button className="btn btn-secondary" onClick={() => setCurrentScreen('dashboard')} disabled={loading}>
           Cancel
         </button>
         <button
@@ -208,9 +145,8 @@ function Review() {
         </button>
       </div>
 
-      {/* Form Info */}
       <div className="mt-24 text-center text-muted" style={{ fontSize: '12px' }}>
-        Autofilling on: {new URL(mappingResult.url).hostname}
+        Filling on: {safeDisplayUrl(mappingResult.url)}
       </div>
     </div>
   );

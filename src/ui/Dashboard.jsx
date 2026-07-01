@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from './Popup.jsx';
-import { mapProfileToForm } from '../engine/mapper.js';
+import { simpleMapProfileToForm } from '../engine/simpleMapper.js';
 
 function Dashboard() {
   const {
@@ -24,101 +24,71 @@ function Dashboard() {
   }, []);
 
   const calculateProfileCompletion = () => {
-    if (!profile || !profile.profile) {
-      setProfileCompletion(0);
-      return;
-    }
-
-    let filledFields = 0;
-    let totalFields = 0;
-
-    const checkFields = (obj) => {
-      for (const key in obj) {
-        if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
-          checkFields(obj[key]);
+    if (!profile || !profile.profile) { setProfileCompletion(0); return; }
+    let filled = 0, total = 0;
+    const walk = (obj) => {
+      for (const k in obj) {
+        if (typeof obj[k] === 'object' && obj[k] !== null && !Array.isArray(obj[k])) {
+          walk(obj[k]);
         } else {
-          totalFields++;
-          if (obj[key] && obj[key] !== '' && (!Array.isArray(obj[key]) || obj[key].length > 0)) {
-            filledFields++;
-          }
+          total++;
+          if (obj[k] && obj[k] !== '' && (!Array.isArray(obj[k]) || obj[k].length > 0)) filled++;
         }
       }
     };
-
-    checkFields(profile.profile);
-    const percentage = totalFields > 0 ? Math.round((filledFields / totalFields) * 100) : 0;
-    setProfileCompletion(percentage);
+    walk(profile.profile);
+    setProfileCompletion(total > 0 ? Math.round((filled / total) * 100) : 0);
   };
 
   const getStorageUsage = async () => {
     try {
       const result = await chrome.storage.local.getBytesInUse(null);
-      const usageMB = (result / (1024 * 1024)).toFixed(2);
-      setStorageUsage(usageMB);
-    } catch (err) {
-      console.error('[Dashboard] Failed to get storage usage:', err);
-    }
+      setStorageUsage((result / (1024 * 1024)).toFixed(2));
+    } catch (err) { console.error('[Dashboard] Storage error:', err); }
   };
 
   const checkForForms = async () => {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab) return;
-
       const response = await chrome.runtime.sendMessage({ action: 'GET_LAST_SCANNED_DATA' });
       if (response && response.formData && response.formData.url === tab.url) {
         setFormData(response.formData);
         setFormsDetected(response.formData.forms ? response.formData.forms.length : 0);
         setLastScannedUrl(tab.url);
       }
-    } catch (err) {
-      console.error('[Dashboard] Failed to check for forms:', err);
-    }
+    } catch (err) { console.error('[Dashboard] checkForForms error:', err); }
   };
 
   const handleScanPage = async () => {
     setScanning(true);
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab || !tab.id) {
-        alert('No active tab found');
-        return;
-      }
+      if (!tab || !tab.id) { alert('No active tab found'); return; }
 
-      console.log('[Dashboard] Triggering manual scan on tab:', tab.id);
-
+      console.log('[Dashboard] Scanning tab:', tab.id, tab.url);
       const response = await chrome.tabs.sendMessage(tab.id, { action: 'SCAN_PAGE' });
 
       if (response && response.success) {
-        console.log('[Dashboard] Scan successful, found', response.data.forms.length, 'forms');
-
-        await new Promise(resolve => setTimeout(resolve, 300));
-
+        await new Promise(r => setTimeout(r, 300));
         const bgResponse = await chrome.runtime.sendMessage({ action: 'GET_LAST_SCANNED_DATA' });
-
         if (bgResponse && bgResponse.formData) {
           setFormData(bgResponse.formData);
           const numForms = bgResponse.formData.forms ? bgResponse.formData.forms.length : 0;
           setFormsDetected(numForms);
           setLastScannedUrl(tab.url);
-
-          if (numForms === 0) {
-            alert('✅ Page scanned but no forms detected.\n\nMake sure:\n1. The page has <form> tags\n2. Form fields are visible\n3. Fields are not in iframes');
-          } else {
-            console.log('[Dashboard] Successfully detected', numForms, 'form(s)');
-          }
+          if (numForms === 0) alert('Page scanned — no forms found.');
+          else console.log('[Dashboard] Detected', numForms, 'form(s)');
         }
       } else {
-        console.warn('[Dashboard] Scan returned no data');
-        setFormsDetected(0);
         alert('No forms detected on this page');
       }
     } catch (err) {
       console.error('[Dashboard] Scan failed:', err);
       if (err.message && err.message.includes('Could not establish connection')) {
-        alert('⚠️ Scanner not loaded on this page.\n\nTry:\n1. Refresh the page\n2. Click Scan Page again\n3. Check if page is a chrome:// or extension:// page (not supported)');
+        alert('⚠️ Refresh the page, then click Scan Page again.');
       } else {
-        alert('Failed to scan page: ' + err.message);
+        alert('Scan failed: ' + err.message);
       }
     } finally {
       setScanning(false);
@@ -127,54 +97,62 @@ function Dashboard() {
 
   const handleAutofill = async () => {
     try {
+      // 1. Get scanned form data
       const response = await chrome.runtime.sendMessage({ action: 'GET_LAST_SCANNED_DATA' });
+      console.log('[Dashboard] GET_LAST_SCANNED_DATA response:', response);
+
       if (!response || !response.formData) {
-        alert('Please scan the page first');
+        alert('Please scan the page first (click Scan Page)');
         return;
       }
-
       if (!response.formData.forms || response.formData.forms.length === 0) {
-        alert('No forms detected. Click "Scan Page" first.');
+        alert('No forms detected. Click Scan Page first.');
         return;
       }
 
-      // FIX: mapProfileToForm expects the inner profile object { personal, education, ... }
-      // The context stores { profile: { personal, education, ... } } — unwrap one level.
+      // 2. Unwrap profile — always use the inner object
       const innerProfile = profile?.profile ?? profile;
-      const mapping = mapProfileToForm(innerProfile, response.formData);
+      console.log('[Dashboard] innerProfile keys:', innerProfile ? Object.keys(innerProfile) : 'NULL');
+      console.log('[Dashboard] formData forms:', response.formData.forms.length);
+      console.log('[Dashboard] formData fields:', response.formData.forms[0]?.fields?.map(f => `${f.label}(${f.type})`));
+
+      // 3. Run simple keyword mapper
+      const mapping = simpleMapProfileToForm(innerProfile, response.formData);
+      console.log('[Dashboard] Mapping result:', mapping);
 
       if (!mapping.matches || mapping.matches.length === 0) {
-        alert('No matching fields found between your profile and the detected forms.');
+        // Show detailed debug info
+        const fieldSummary = response.formData.forms
+          .flatMap(f => f.fields)
+          .map(f => `  • label="${f.label}" name="${f.name}" type="${f.type}"`)
+          .join('\n');
+        console.error('[Dashboard] 0 matches. Detected fields:\n' + fieldSummary);
+        alert(
+          `No fields matched.\n\nDetected fields:\n${fieldSummary}\n\n` +
+          `Check console (F12) for detailed matching log.`
+        );
         return;
       }
 
+      // 4. Go to review screen
       setMappingResult(mapping);
       setCurrentScreen('review');
     } catch (err) {
-      console.error('[Dashboard] Autofill failed:', err);
-      alert('Failed to prepare autofill');
+      console.error('[Dashboard] Autofill error:', err);
+      alert('Autofill error: ' + err.message);
     }
   };
 
-  const handleEditProfile = () => {
-    setCurrentScreen('edit-profile');
-  };
+  const handleEditProfile = () => setCurrentScreen('edit-profile');
 
   const handleLock = () => {
-    if (confirm('Lock profile and close popup?')) {
-      resetState();
-      window.close();
-    }
+    if (confirm('Lock profile and close popup?')) { resetState(); window.close(); }
   };
 
-  const getFirstName = () => {
-    return profile?.profile?.personal?.firstName || 'User';
-  };
+  const getFirstName = () => profile?.profile?.personal?.firstName || 'User';
 
-  const getStorageBarClass = () => {
-    if (storageUsage > 4) return 'storage-fill danger';
-    if (storageUsage > 3) return 'storage-fill warning';
-    return 'storage-fill';
+  const safeHostname = (url) => {
+    try { return new URL(url).hostname; } catch { return url; }
   };
 
   return (
@@ -201,9 +179,7 @@ function Dashboard() {
       <div className="progress-text mb-24">{profileCompletion}% of profile fields filled</div>
 
       <div className="btn-group">
-        <button className="btn btn-primary" onClick={handleEditProfile}>
-          ✏️ Edit Profile
-        </button>
+        <button className="btn btn-primary" onClick={handleEditProfile}>✏️ Edit Profile</button>
         <button className="btn btn-secondary" onClick={handleScanPage} disabled={scanning}>
           {scanning ? '🔄 Scanning...' : '🔍 Scan Page'}
         </button>
@@ -223,16 +199,17 @@ function Dashboard() {
 
       <div className="storage-meter">
         <div className="storage-bar">
-          <div className={getStorageBarClass()} style={{ width: `${(storageUsage / 5) * 100}%` }}></div>
+          <div
+            className={`storage-fill${storageUsage > 4 ? ' danger' : storageUsage > 3 ? ' warning' : ''}`}
+            style={{ width: `${(storageUsage / 5) * 100}%` }}
+          />
         </div>
-        <div className="storage-text">
-          Storage: {storageUsage} MB / 5 MB used
-        </div>
+        <div className="storage-text">Storage: {storageUsage} MB / 5 MB used</div>
       </div>
 
       {lastScannedUrl && (
         <div className="mt-16 text-center text-muted" style={{ fontSize: '12px' }}>
-          Last scanned: {new URL(lastScannedUrl).hostname}
+          Last scanned: {safeHostname(lastScannedUrl)}
         </div>
       )}
     </div>
