@@ -1,153 +1,91 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import Login from './Login.jsx';
 import Dashboard from './Dashboard.jsx';
 import ProfileForm from './ProfileForm.jsx';
 import Review from './Review.jsx';
 import { loadProfile } from '../storage/profileStore.js';
+import { DEV_MODE, DEV_PROFILE } from '../devData.js';
 import './styles.css';
 
-// Storage key (must match profileStore.js)
-const STORAGE_KEY = 'autofill_extension_profile';
-
-// Create App Context
 export const AppContext = createContext();
-
-// Custom hook for using context
 export const useAppContext = () => {
-  const context = useContext(AppContext);
-  if (!context) {
-    throw new Error('useAppContext must be used within AppContextProvider');
-  }
-  return context;
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useAppContext must be used within AppContext.Provider');
+  return ctx;
 };
 
 function Popup() {
-  // Global state
   const [currentScreen, setCurrentScreen] = useState('loading');
-  const [profile, setProfile] = useState(null);
-  const [password, setPassword] = useState(null);
-  const [isUnlocked, setIsUnlocked] = useState(false);
-  const [formData, setFormData] = useState(null);
+  const [profile, setProfile]             = useState(null);
+  const [formData, setFormData]           = useState(null);
   const [mappingResult, setMappingResult] = useState(null);
-  const [error, setError] = useState(null);
+  const [error, setError]                 = useState(null);
 
-  // Check if profile exists on mount
-  useEffect(() => {
-    checkProfileExists();
-  }, []);
+  useEffect(() => { init(); }, []);
 
-  const checkProfileExists = async () => {
+  const init = async () => {
     try {
-      // Try to get encrypted profile from storage using correct key
-      const result = await chrome.storage.local.get([STORAGE_KEY]);
-      
-      if (result[STORAGE_KEY]) {
-        // Profile exists, show login
-        console.log('[Popup] Profile detected, showing login screen');
-        setCurrentScreen('login');
+      // ── DEV MODE: skip storage, use hardcoded test data instantly ──
+      if (DEV_MODE) {
+        console.log('[Popup] DEV_MODE active — using devData.js profile');
+        setProfile(DEV_PROFILE);
+        setCurrentScreen('dashboard');
+        return;
+      }
+
+      // ── PRODUCTION: load from storage, no password needed ──
+      const stored = await loadProfile();
+      if (stored) {
+        console.log('[Popup] Profile loaded from storage');
+        setProfile(stored);
+        setCurrentScreen('dashboard');
       } else {
-        // No profile, show create screen
-        console.log('[Popup] No profile found, showing create screen');
+        console.log('[Popup] No profile found — showing create screen');
         setCurrentScreen('create');
       }
     } catch (err) {
-      console.error('[Popup] Error checking profile:', err);
-      setError('Failed to check profile existence');
-      setCurrentScreen('create'); // Default to create
+      console.error('[Popup] Init error:', err);
+      setCurrentScreen('create');
     }
   };
 
-  // Context value
   const contextValue = {
-    // State
-    currentScreen,
-    profile,
-    password,
-    isUnlocked,
-    formData,
-    mappingResult,
-    error,
-    
-    // Setters
-    setCurrentScreen,
-    setProfile,
-    setPassword,
-    setIsUnlocked,
-    setFormData,
-    setMappingResult,
-    setError,
-    
-    // Helper methods
+    currentScreen, profile, formData, mappingResult, error,
+    setCurrentScreen, setProfile, setFormData, setMappingResult, setError,
     resetState: () => {
-      setProfile(null);
-      setPassword(null);
-      setIsUnlocked(false);
-      setFormData(null);
-      setMappingResult(null);
-      setError(null);
+      setProfile(null); setFormData(null); setMappingResult(null); setError(null);
+      setCurrentScreen('create');
     }
   };
 
-  // Render current screen
   const renderScreen = () => {
     switch (currentScreen) {
       case 'loading':
-        return (
-          <div className="loading-container">
-            <div className="spinner"></div>
-          </div>
-        );
-      
-      case 'login':
-        return <Login />;
-      
+        return <div className="loading-container"><div className="spinner"></div></div>;
       case 'create':
         return <ProfileForm mode="create" />;
-      
       case 'dashboard':
         return <Dashboard />;
-      
       case 'edit-profile':
         return <ProfileForm mode="edit" initialProfile={profile} />;
-      
       case 'review':
         return <Review />;
-      
       default:
-        return (
-          <div className="content">
-            <div className="alert alert-error">
-              Unknown screen: {currentScreen}
-            </div>
-          </div>
-        );
+        return <div className="content"><div className="alert alert-error">Unknown screen: {currentScreen}</div></div>;
     }
   };
 
   return (
     <AppContext.Provider value={contextValue}>
       <div className="popup-container">
-        {/* Header */}
         <header className="header">
           <h1>⚡ Autofill Assistant</h1>
+          {DEV_MODE && <div style={{fontSize:'10px',color:'#ff9800',textAlign:'center'}}>DEV MODE</div>}
         </header>
-
-        {/* Main Content */}
         <main>
-          {error && (
-            <div className="content">
-              <div className="alert alert-error">
-                {error}
-              </div>
-            </div>
-          )}
+          {error && <div className="content"><div className="alert alert-error">{error}</div></div>}
           {renderScreen()}
         </main>
-
-        {/* Footer */}
-        <footer className="footer">
-          v0.1.0 | Smart Job Application Autofill
-        </footer>
+        <footer className="footer">v0.1.0 | Smart Job Application Autofill</footer>
       </div>
     </AppContext.Provider>
   );
